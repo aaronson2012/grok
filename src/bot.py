@@ -1,0 +1,57 @@
+import discord
+import os
+import logging
+from discord.ext import commands
+from .config import config
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("grok.bot")
+
+class GrokBot(commands.Bot):
+    def __init__(self):
+        super().__init__(
+            command_prefix=commands.when_mentioned_or("!"),
+            intents=discord.Intents.all(),
+            help_command=None
+        )
+    
+    async def on_ready(self):
+        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
+        logger.info(f"Connected to {len(self.guilds)} guilds")
+        
+        # Load extensions
+        await self.load_extensions()
+        
+        # Sync commands
+        try:
+            # sync_commands returns a list of commands, or raises error
+            synced = await self.sync_commands()
+            logger.info(f"Synced {len(synced)} commands")
+        except Exception as e:
+            logger.error(f"Failed to sync commands: {e}")
+
+    async def load_extensions(self):
+        for filename in os.listdir("./src/cogs"):
+            if filename.endswith(".py") and not filename.startswith("_"):
+                try:
+                    self.load_extension(f"src.cogs.{filename[:-3]}")
+                    logger.info(f"Loaded extension: {filename}")
+                except Exception as e:
+                    logger.error(f"Failed to load extension {filename}: {e}")
+
+    async def on_message(self, message):
+        if message.author.bot:
+            return
+        
+        # Process commands first
+        await self.process_commands(message)
+        
+        # If it's a direct mention and not a command, trigger AI (logic will be in a cog)
+        # Note: process_commands might have already handled it if it was a command.
+        # Ideally, the Chat Cog listener handles this, but we need to ensure we don't duplicate.
+        # The Chat Cog uses @commands.Cog.listener(), which runs in parallel to this if we don't block.
+        # But here we are just ensuring standard processing.
+        pass
+
+bot = GrokBot()
