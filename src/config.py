@@ -7,7 +7,7 @@ load_dotenv()
 class Config:
     DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp") # Updated to likely correct model, awaiting verification
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-3-flash-preview") # Updated to correct model
     DATABASE_PATH = os.getenv("DATABASE_PATH", "data/grok.db")
     
     @classmethod
