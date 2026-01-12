@@ -199,6 +199,8 @@ class Chat(commands.Cog):
                         tool_result = await tool_registry.execute(func_name, args)
                     except Exception as e:
                         tool_result = f"Error executing tool {func_name}: {e}"
+                        # Log tool failure to DB
+                        await db.log_error(e, {"context": "Tool Execution", "tool": func_name, "args": args, "guild_id": message.guild.id if message.guild else None})
                         
                     # Add the search context to the history for the final answer
                     context_injection = f"Tool Output for '{func_name}':\n{tool_result}"

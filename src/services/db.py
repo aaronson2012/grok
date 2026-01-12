@@ -1,5 +1,8 @@
 import aiosqlite
 import logging
+import traceback
+import json
+from datetime import datetime
 from ..config import config
 
 logger = logging.getLogger("grok.db")
@@ -62,6 +65,15 @@ class Database:
             content TEXT,
             last_msg_id INTEGER,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS error_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            error_type TEXT,
+            message TEXT,
+            traceback TEXT,
+            context TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
         try:
@@ -160,5 +172,27 @@ class Database:
         async with self.conn.execute("SELECT system_prompt FROM personas WHERE name = 'Standard'") as cursor:
             row = await cursor.fetchone()
             return row['system_prompt'] if row else "You are a helpful assistant."
+
+    async def log_error(self, error: Exception, context: dict = None):
+        """
+        Logs an exception to the database with context.
+        """
+        try:
+            error_type = type(error).__name__
+            message = str(error)
+            tb = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+            context_json = json.dumps(context, default=str) if context else "{}"
+            
+            query = """
+            INSERT INTO error_logs (error_type, message, traceback, context)
+            VALUES (?, ?, ?, ?)
+            """
+            await self.conn.execute(query, (error_type, message, tb, context_json))
+            await self.conn.commit()
+            logger.error(f"Logged error to DB: {error_type}: {message}")
+        except Exception as e:
+            # Fallback if DB logging fails (e.g. DB locked or closed)
+            logger.error(f"Failed to log error to DB: {e}")
+            logger.error(f"Original error: {error}")
 
 db = Database()

@@ -2,6 +2,7 @@ from openai import AsyncOpenAI, APIError, APITimeoutError, RateLimitError
 from ..config import config
 from .tools import tool_registry
 from ..utils.decorators import async_retry
+from .db import db
 import logging
 
 logger = logging.getLogger("grok.ai")
@@ -55,6 +56,10 @@ class AIService:
             return response.choices[0].message
         except Exception as e:
             logger.error(f"Error generating AI response: {e}")
+            
+            # Log to DB for debugging
+            await db.log_error(e, {"context": "AIService.generate_response", "system_prompt": system_prompt[:100], "user_message_len": len(str(user_message))})
+            
             # If retry failed, re-raise so the retry decorator handles it or the caller
             # But wait, we want to return a fallback for user-facing errors?
             # Ideally the decorator handles the retries, and if it still fails, we want to return a fallback

@@ -2,6 +2,7 @@ import logging
 import httpx
 from ..config import config
 from ..utils.decorators import async_retry
+from .db import db
 
 logger = logging.getLogger("grok.search")
 
@@ -49,10 +50,15 @@ class SearchService:
 
         except Exception as e:
             logger.error(f"Brave Search failed: {e}")
+            
             # If retry fails (or other exception), return error message
             # But raise HTTP errors so retry catches them!
             if isinstance(e, (httpx.HTTPError, httpx.TimeoutException)):
                 raise e
+                
+            # Log non-retriable (or final) errors to DB
+            await db.log_error(e, {"context": "SearchService.search", "query": query})
+            
             return f"Search failed: {str(e)}"
 
 
