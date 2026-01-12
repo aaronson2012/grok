@@ -3,6 +3,7 @@ from discord.ext import commands
 from typing import override
 import logging
 import json
+from datetime import datetime
 from ..services.ai import ai_service
 from ..services.db import db
 from ..services.search import search_service
@@ -39,7 +40,11 @@ class Chat(commands.Cog):
                     if content:
                         history.insert(0, {"role": role, "content": content})
 
-                system_prompt = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
+                base_persona = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
+                
+                # Inject Date Context
+                current_date = datetime.now().strftime("%Y-%m-%d")
+                system_prompt = f"Current Date: {current_date}\n{base_persona}"
 
                 # First AI Call
                 ai_msg = await ai_service.generate_response(

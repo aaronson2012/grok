@@ -52,10 +52,13 @@ class GrokBot(commands.Bot):
         await self.process_commands(message)
         
         # If it's a direct mention and not a command, trigger AI (logic will be in a cog)
-        # Note: process_commands might have already handled it if it was a command.
-        # Ideally, the Chat Cog listener handles this, but we need to ensure we don't duplicate.
-        # The Chat Cog uses @commands.Cog.listener(), which runs in parallel to this if we don't block.
-        # But here we are just ensuring standard processing.
         pass
+
+    async def on_command_error(self, ctx, error):
+        if isinstance(error, commands.CommandNotFound):
+            return # Ignore unknown commands
+        logger.error(f"Command error: {error}")
+        # Optionally report other errors to the user
+        # await ctx.send(f"An error occurred: {error}")
 
 bot = GrokBot()
