@@ -46,10 +46,21 @@ class Chat(commands.Cog):
                 current_date = datetime.now().strftime("%Y-%m-%d")
                 system_prompt = f"Current Date: {current_date}\n{base_persona}"
 
+                # Construct Message Content (Multimodal)
+                user_content = [{"type": "text", "text": clean_content}]
+                
+                # Add images if present
+                for attachment in message.attachments:
+                    if attachment.content_type and attachment.content_type.startswith("image/"):
+                        user_content.append({
+                            "type": "image_url",
+                            "image_url": {"url": attachment.url}
+                        })
+
                 # First AI Call
                 ai_msg = await ai_service.generate_response(
                     system_prompt=system_prompt,
-                    user_message=clean_content,
+                    user_message=user_content,
                     history=history
                 )
 

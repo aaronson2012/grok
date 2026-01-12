@@ -33,10 +33,14 @@ class AIService:
             }
         ]
 
-    async def generate_response(self, system_prompt: str, user_message: str, history: list[dict] = None, tools: list = None) -> any:
+    async def generate_response(self, system_prompt: str, user_message: str | list, history: list[dict] = None, tools: list = None) -> any:
         """
         Generates a response from the AI model.
         Returns the full response message object (which might contain tool_calls).
+        Args:
+            system_prompt: The system instruction.
+            user_message: String (text only) or List (multimodal content blocks).
+            history: Previous messages.
         """
         messages = [{"role": "system", "content": system_prompt}]
         
