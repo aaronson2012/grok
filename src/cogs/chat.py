@@ -26,10 +26,14 @@ class Chat(commands.Cog):
     """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._ready_executed = False
 
     @commands.Cog.listener()
     @override
     async def on_ready(self) -> None:
+        if self._ready_executed:
+            return
+        self._ready_executed = True
         logger.info(f'Cog {self.__class__.__name__} is ready.')
         # Trigger background emoji analysis
         # In a real production app, this should be a task loop or queue
@@ -69,7 +73,7 @@ class Chat(commands.Cog):
                 content = f"[{msg.author.id}]: {content}"
                 
             if content:
-                history.insert(0, {"role": role, "content": content})
+                history.insert(0, {"role": role, "content": content, "id": msg.id})
         return history
 
     async def _check_and_reset_persona(self, message: discord.Message) -> bool:
@@ -222,33 +226,36 @@ class Chat(commands.Cog):
                     await message.reply(chunk, mention_author=False)
 
                 # Background Summarization Check
-                # We check if we have enough unsummarized history.
-                # Since we don't store messages, we just check if history length > 15
-                # And if the last summary update was "a while ago" (implied by content change).
-                # Simpler: If history > 10, trigger summary update of the *oldest* 5 messages + current summary.
+                last_summarized_id = summary_data['last_msg_id'] if summary_data else 0
                 
-                if len(history) > 10:
-                    self.bot.loop.create_task(self._update_summary(message.channel, current_summary, history))
+                # Filter for messages newer than the last summary
+                # History is ordered [Oldest, ..., Newest]
+                unsummarized_msgs = [m for m in history if m.get('id', 0) > last_summarized_id]
+                
+                # If we have enough new data (e.g. 10 messages), trigger a summary update
+                if len(unsummarized_msgs) >= 10:
+                    # We'll summarize all pending messages to catch up
+                    self.bot.loop.create_task(self._update_summary(message.channel, current_summary, unsummarized_msgs))
 
-    async def _update_summary(self, channel, current_summary, history):
+    async def _update_summary(self, channel, current_summary, messages):
         try:
-            # Take the oldest 5 messages from history to summarize
-            # History format: [{'role': 'user', 'content': '...'}, ...]
+            if not messages:
+                return
+
+            # Format messages for the summarizer
             to_summarize = []
-            for msg in history[:5]: # Oldest 5
+            for msg in messages:
                 role = msg['role']
                 content = msg['content']
                 to_summarize.append(f"{role}: {content}")
             
             new_summary = await ai_service.summarize_conversation(current_summary, to_summarize)
             
-            # Use the ID of the last message we summarized to track position
-            # Ideally we'd parse the ID from the content string "[ID]: text"
-            # But for now, we just update the content.
-            # In a robust system, we'd use message IDs.
+            # The last message in the list is the newest one we just summarized
+            last_msg_id = messages[-1]['id']
             
-            await db.update_channel_summary(channel.id, new_summary, 0)
-            logger.info(f"Updated summary for channel {channel.name}")
+            await db.update_channel_summary(channel.id, new_summary, last_msg_id)
+            logger.info(f"Updated summary for channel {channel.name} (up to msg {last_msg_id})")
             
         except Exception as e:
             logger.error(f"Failed to update summary: {e}")
