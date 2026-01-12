@@ -75,6 +75,77 @@ class PersonaDeleteView(discord.ui.View):
         self.add_item(PersonaDeleteSelect(personas, author_id))
 
 
+class PersonaModal(discord.ui.Modal):
+    def __init__(self):
+        super().__init__(title="Create New Persona")
+        self.add_item(discord.ui.InputText(
+            label="Describe the Persona",
+            placeholder="e.g. Batman, or 'A sarcastic hacker'...",
+            style=discord.InputTextStyle.paragraph,
+            min_length=3,
+            max_length=1000
+        ))
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        user_input = self.children[0].value
+        
+        try:
+            # Generate Name, Description, and Prompt
+            ai_prompt = (
+                f"User Input: '{user_input}'\n\n"
+                "Task: Create a Discord bot persona based on this input.\n"
+                "Output strictly in this format:\n"
+                "NAME: <The direct character name or simple title. Max 15 chars. No spaces. e.g. 'Batman' not 'DarkKnight', 'Mario' not 'Plumber'>\n"
+                "DESCRIPTION: <A short 1-sentence summary of who this is>\n"
+                "PROMPT: <A 2-3 sentence system instruction. Start with 'You are...'>"
+            )
+            
+            ai_msg = await ai_service.generate_response(
+                system_prompt="You are a configuration generator.",
+                user_message=ai_prompt
+            )
+            
+            # Parse output
+            content = ai_msg.content.strip()
+            name = "Unknown"
+            description = "Custom Persona"
+            prompt = "You are a helpful assistant."
+            
+            for line in content.split('\n'):
+                if line.startswith("NAME:"):
+                    name = line.replace("NAME:", "").strip()
+                elif line.startswith("DESCRIPTION:"):
+                    description = line.replace("DESCRIPTION:", "").strip()
+                elif line.startswith("PROMPT:"):
+                    prompt = line.replace("PROMPT:", "").strip()
+            
+            # Fallback if parsing fails
+            if name == "Unknown":
+                name = user_input.split()[0][:15]
+                description = user_input[:50]
+            
+            # Check uniqueness
+            async with db.conn.execute("SELECT 1 FROM personas WHERE name = ? COLLATE NOCASE", (name,)) as cursor:
+                if await cursor.fetchone():
+                    name = f"{name}_{interaction.user.discriminator}" # collision fallback
+
+            await db.conn.execute("""
+                INSERT INTO personas (name, description, system_prompt, is_global, created_by)
+                VALUES (?, ?, ?, 0, ?)
+            """, (name, description, prompt, interaction.user.id))
+            await db.conn.commit()
+            
+            embed = discord.Embed(title="✨ Persona Created", color=discord.Color.green())
+            embed.add_field(name="Name", value=name, inline=True)
+            embed.add_field(name="Description", value=description, inline=True)
+            embed.add_field(name="System Prompt", value=prompt, inline=False)
+            
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            await interaction.followup.send(f"❌ Creation failed: {e}")
+
 class Settings(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
