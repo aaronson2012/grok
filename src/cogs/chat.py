@@ -3,17 +3,13 @@ from discord.ext import commands
 from typing import override
 import logging
 from ..services.ai import ai_service
+from ..services.db import db
 
 logger = logging.getLogger("grok.chat")
 
 class Chat(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.default_system_prompt = (
-            "You are Grok, a witty and helpful AI companion in a Discord server. "
-            "You respond naturally, use emojis where appropriate, and keep the conversation engaging. "
-            "You are not the xAI Grok, but a unique assistant."
-        )
 
     @commands.Cog.listener()
     @override
@@ -66,7 +62,7 @@ class Chat(commands.Cog):
                         history.insert(0, {"role": role, "content": content})
 
                 response = await ai_service.generate_response(
-                    system_prompt=self.default_system_prompt,
+                    system_prompt=await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant.",
                     user_message=clean_content,
                     history=history
                 )
@@ -76,8 +72,11 @@ class Chat(commands.Cog):
     @discord.slash_command(name="chat", description="Start a new chat thread with Grok")
     async def chat(self, ctx: discord.ApplicationContext, prompt: str) -> None:
         await ctx.defer()
+        
+        system_prompt = await db.get_guild_persona(ctx.guild.id) if ctx.guild else "You are a helpful assistant."
+        
         response = await ai_service.generate_response(
-            system_prompt=self.default_system_prompt,
+            system_prompt=system_prompt,
             user_message=prompt
         )
         await ctx.respond(response)

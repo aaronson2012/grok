@@ -3,6 +3,7 @@ import os
 import logging
 from discord.ext import commands
 from .config import config
+from .services.db import db
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -19,6 +20,9 @@ class GrokBot(commands.Bot):
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
         logger.info(f"Connected to {len(self.guilds)} guilds")
+        
+        # Initialize Database
+        await db.connect()
         
         # Load extensions
         await self.load_extensions()
