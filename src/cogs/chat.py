@@ -142,6 +142,10 @@ class Chat(commands.Cog):
             async with message.channel.typing():
                 history = await self._build_message_history(message)
                 
+                # Fetch Summary
+                summary_data = await db.get_channel_summary(message.channel.id)
+                current_summary = summary_data['content'] if summary_data else ""
+                
                 reset_triggered = await self._check_and_reset_persona(message)
                 if reset_triggered:
                     await message.channel.send("⏳ *It's been a while. Reverting to my default personality.*")
@@ -149,10 +153,12 @@ class Chat(commands.Cog):
                 base_persona = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
                 emoji_context = await db.get_guild_emojis_context(message.guild.id) if message.guild else ""
                 
-                # Inject Date & Focus Instruction
+                # Inject Date, Focus, and Memory
                 current_date = datetime.now().strftime("%Y-%m-%d")
+                memory_block = f"\n[PREVIOUS CONVERSATION SUMMARY]:\n{current_summary}\n" if current_summary else ""
+                
                 system_prompt = (
-                    f"Current Date: {current_date}\n{base_persona}\n{emoji_context}\n\n"
+                    f"Current Date: {current_date}\n{base_persona}\n{emoji_context}\n{memory_block}\n"
                     "INSTRUCTION: Focus primarily on the user's latest message. "
                     "Use the chat history ONLY for context if relevant. "
                     "If the latest request is unrelated to previous messages, treat it as a new topic. "
@@ -183,6 +189,9 @@ class Chat(commands.Cog):
                     if func_name == "web_search":
                         query = args.get("query", "something")
                         await message.channel.send(f"🔎 Searching for: *{query}*...")
+                    elif func_name == "calculator":
+                        expr = args.get("expression", "math")
+                        await message.channel.send(f"🧮 Calculating: *{expr}*...")
                     else:
                         await message.channel.send(f"🤖 Using tool: *{func_name}*...")
 
@@ -209,6 +218,38 @@ class Chat(commands.Cog):
                 # Split and send chunks if too long
                 for chunk in chunk_text(response_text):
                     await message.reply(chunk, mention_author=False)
+
+                # Background Summarization Check
+                # We check if we have enough unsummarized history.
+                # Since we don't store messages, we just check if history length > 15
+                # And if the last summary update was "a while ago" (implied by content change).
+                # Simpler: If history > 10, trigger summary update of the *oldest* 5 messages + current summary.
+                
+                if len(history) > 10:
+                    self.bot.loop.create_task(self._update_summary(message.channel, current_summary, history))
+
+    async def _update_summary(self, channel, current_summary, history):
+        try:
+            # Take the oldest 5 messages from history to summarize
+            # History format: [{'role': 'user', 'content': '...'}, ...]
+            to_summarize = []
+            for msg in history[:5]: # Oldest 5
+                role = msg['role']
+                content = msg['content']
+                to_summarize.append(f"{role}: {content}")
+            
+            new_summary = await ai_service.summarize_conversation(current_summary, to_summarize)
+            
+            # Use the ID of the last message we summarized to track position
+            # Ideally we'd parse the ID from the content string "[ID]: text"
+            # But for now, we just update the content.
+            # In a robust system, we'd use message IDs.
+            
+            await db.update_channel_summary(channel.id, new_summary, 0)
+            logger.info(f"Updated summary for channel {channel.name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to update summary: {e}")
 
     @discord.slash_command(name="chat", description="Start a new chat thread with Grok")
     async def chat(self, ctx: discord.ApplicationContext, prompt: str) -> None:

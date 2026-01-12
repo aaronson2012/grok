@@ -55,8 +55,38 @@ class AIService:
             return response.choices[0].message
         except Exception as e:
             logger.error(f"Error generating AI response: {e}")
-            # Return a dummy object with content so the bot doesn't crash
+            # If retry failed, re-raise so the retry decorator handles it or the caller
+            # But wait, we want to return a fallback for user-facing errors?
+            # Ideally the decorator handles the retries, and if it still fails, we want to return a fallback
+            # UNLESS we are in a background task (like summarization).
+            
+            # Let's keep the fallback for chat responses, but we need to know context.
+            # For now, simplistic approach:
             from types import SimpleNamespace
             return SimpleNamespace(content="I'm having trouble thinking right now. Please try again later.", tool_calls=None)
+
+    @async_retry(retries=2, delay=2.0)
+    async def summarize_conversation(self, current_summary: str, new_messages: list[str]) -> str:
+        """
+        Generates a concise summary of the conversation.
+        """
+        prompt = (
+            "Update the conversation summary with the new messages.\n"
+            "Keep it concise (max 3 sentences) and focus on key facts/decisions.\n"
+            f"Current Summary: {current_summary or 'None'}\n"
+            f"New Messages:\n" + "\n".join(new_messages)
+        )
+        
+        messages = [
+            {"role": "system", "content": "You are a conversation summarizer."},
+            {"role": "user", "content": prompt}
+        ]
+        
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=messages
+        )
+        
+        return response.choices[0].message.content
 
 ai_service = AIService()

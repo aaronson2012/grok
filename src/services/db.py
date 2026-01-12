@@ -56,6 +56,13 @@ class Database:
             last_analyzed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(emoji_id, guild_id)
         );
+
+        CREATE TABLE IF NOT EXISTS summaries (
+            channel_id INTEGER PRIMARY KEY,
+            content TEXT,
+            last_msg_id INTEGER,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
         """
         try:
             await self.conn.executescript(schema)
@@ -114,6 +121,28 @@ class Database:
             lines.append(f"- <{prefix}:{row['name']}:{row['emoji_id']}> : {row['description']}")
             
         return "\n".join(lines)
+
+    async def get_channel_summary(self, channel_id: int):
+        """Retrieves the stored summary for a channel."""
+        query = "SELECT content, last_msg_id FROM summaries WHERE channel_id = ?"
+        async with self.conn.execute(query, (channel_id,)) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {"content": row['content'], "last_msg_id": row['last_msg_id']}
+        return None
+
+    async def update_channel_summary(self, channel_id: int, content: str, last_msg_id: int):
+        """Updates or inserts a channel summary."""
+        query = """
+        INSERT INTO summaries (channel_id, content, last_msg_id, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(channel_id) DO UPDATE SET
+            content = excluded.content,
+            last_msg_id = excluded.last_msg_id,
+            updated_at = CURRENT_TIMESTAMP
+        """
+        await self.conn.execute(query, (channel_id, content, last_msg_id))
+        await self.conn.commit()
 
     async def get_guild_persona(self, guild_id: int):
         query = """
