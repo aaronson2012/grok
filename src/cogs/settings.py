@@ -105,6 +105,33 @@ class PersonaView(discord.ui.View):
         super().__init__()
         self.add_item(PersonaSelect(personas))
 
+class PersonaDeleteSelect(discord.ui.Select):
+    def __init__(self, personas):
+        options = []
+        for p in personas:
+            options.append(discord.SelectOption(
+                label=p['name'],
+                description=f"ID: {p['id']}",
+                value=str(p['id'])
+            ))
+        super().__init__(placeholder="Select a persona to DELETE...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        persona_id = int(self.values[0])
+        name = next(opt.label for opt in self.options if opt.value == self.values[0])
+        
+        await db.conn.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
+        await db.conn.commit()
+        
+        # Disable the dropdown after use
+        self.disabled = True
+        await interaction.response.edit_message(content=f"🗑️ Deleted persona **{name}**.", view=self.view)
+
+class PersonaDeleteView(discord.ui.View):
+    def __init__(self, personas):
+        super().__init__()
+        self.add_item(PersonaDeleteSelect(personas))
+
 class Settings(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -138,23 +165,18 @@ class Settings(commands.Cog):
 
     @persona.command(name="delete", description="Delete a custom persona")
     @discord.default_permissions(administrator=True)
-    async def delete_persona(self, ctx: discord.ApplicationContext, name: str):
-        # Prevent deleting Standard
-        if name.lower() == "standard":
-            await ctx.respond("❌ You cannot delete the default 'Standard' persona.", ephemeral=True)
+    async def delete_persona(self, ctx: discord.ApplicationContext):
+        # Fetch deletable personas (exclude Standard and globals if preferred, 
+        # but for now assume admins can delete anything except 'Standard')
+        async with db.conn.execute("SELECT id, name FROM personas WHERE name != 'Standard' ORDER BY name") as cursor:
+            personas = await cursor.fetchall()
+            
+        if not personas:
+            await ctx.respond("No custom personas found to delete.", ephemeral=True)
             return
 
-        async with db.conn.execute("SELECT id FROM personas WHERE name = ? COLLATE NOCASE", (name,)) as cursor:
-            row = await cursor.fetchone()
-        
-        if not row:
-            await ctx.respond(f"❌ Persona '{name}' not found.", ephemeral=True)
-            return
-            
-        await db.conn.execute("DELETE FROM personas WHERE id = ?", (row['id'],))
-        await db.conn.commit()
-        
-        await ctx.respond(f"🗑️ Deleted persona **{name}**.")
+        view = PersonaDeleteView(personas)
+        await ctx.respond("🗑️ **Select a Persona to Delete**:", view=view, ephemeral=True)
 
     @persona.command(name="current", description="Show the current active persona")
     async def current_persona(self, ctx: discord.ApplicationContext):
