@@ -7,6 +7,7 @@ from datetime import datetime
 from ..services.ai import ai_service
 from ..services.db import db
 from ..services.search import search_service
+from ..services.emoji_manager import emoji_manager
 from ..utils.chunker import chunk_text
 
 logger = logging.getLogger("grok.chat")
@@ -19,6 +20,18 @@ class Chat(commands.Cog):
     @override
     async def on_ready(self) -> None:
         logger.info(f'Cog {self.__class__.__name__} is ready.')
+        # Trigger background emoji analysis
+        # In a real production app, this should be a task loop or queue
+        for guild in self.bot.guilds:
+            self.bot.loop.create_task(self._analyze_emojis_safe(guild))
+
+    async def _analyze_emojis_safe(self, guild):
+        try:
+            count = await emoji_manager.analyze_guild_emojis(guild)
+            if count > 0:
+                logger.info(f"Analyzed {count} emojis for {guild.name}")
+        except Exception as e:
+            logger.error(f"Emoji analysis failed for {guild.name}: {e}")
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -67,15 +80,17 @@ class Chat(commands.Cog):
                     history = history[-10:]
 
                 base_persona = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
+                emoji_context = await db.get_guild_emojis_context(message.guild.id) if message.guild else ""
                 
                 # Inject Date & Focus Instruction
                 current_date = datetime.now().strftime("%Y-%m-%d")
                 system_prompt = (
-                    f"Current Date: {current_date}\n{base_persona}\n\n"
+                    f"Current Date: {current_date}\n{base_persona}\n{emoji_context}\n\n"
                     "INSTRUCTION: Focus primarily on the user's latest message. "
                     "Use the chat history ONLY for context if relevant. "
                     "If the latest request is unrelated to previous messages, treat it as a new topic. "
-                    "IMPORTANT: Keep your response concise and under 1900 characters to fit in a Discord message."
+                    "IMPORTANT: Keep your response concise and under 1900 characters to fit in a Discord message. "
+                    "Use the provided Custom Emojis naturally in your response (about once every 2-3 sentences), matching the tone."
                 )
 
                 # Construct Message Content (Multimodal)

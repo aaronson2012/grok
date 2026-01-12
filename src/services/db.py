@@ -45,6 +45,17 @@ class Database:
             emoji_level INTEGER DEFAULT 5, -- 1-10 scale
             FOREIGN KEY (preferred_persona_id) REFERENCES personas(id)
         );
+
+        CREATE TABLE IF NOT EXISTS emojis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            emoji_id INTEGER,
+            guild_id INTEGER,
+            name TEXT,
+            description TEXT,
+            animated BOOLEAN,
+            last_analyzed TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(emoji_id, guild_id)
+        );
         """
         try:
             await self.conn.executescript(schema)
@@ -79,6 +90,35 @@ class Database:
 
     # --- Helper Methods ---
     
+    async def save_emoji_description(self, emoji_id: int, guild_id: int, name: str, description: str, animated: bool):
+        query = """
+        INSERT INTO emojis (emoji_id, guild_id, name, description, animated, last_analyzed)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(emoji_id, guild_id) DO UPDATE SET
+            description = excluded.description,
+            name = excluded.name,
+            last_analyzed = CURRENT_TIMESTAMP
+        """
+        await self.conn.execute(query, (emoji_id, guild_id, name, description, animated))
+        await self.conn.commit()
+
+    async def get_guild_emojis_context(self, guild_id: int, limit: int = 50):
+        """Returns a formatted string of emoji descriptions for the system prompt."""
+        query = "SELECT emoji_id, name, description, animated FROM emojis WHERE guild_id = ? ORDER BY RANDOM() LIMIT ?"
+        async with self.conn.execute(query, (guild_id, limit)) as cursor:
+            rows = await cursor.fetchall()
+            
+        if not rows:
+            return ""
+            
+        lines = ["\n[Custom Server Emojis Available - USE THESE NATURALLY]:"]
+        for row in rows:
+            # Format: <:name:id> or <a:name:id>
+            prefix = "a" if row['animated'] else ""
+            lines.append(f"- <{prefix}:{row['name']}:{row['emoji_id']}> : {row['description']}")
+            
+        return "\n".join(lines)
+
     async def get_guild_persona(self, guild_id: int):
         query = """
         SELECT p.system_prompt 
