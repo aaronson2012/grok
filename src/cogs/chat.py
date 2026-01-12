@@ -74,7 +74,8 @@ class Chat(commands.Cog):
                     f"Current Date: {current_date}\n{base_persona}\n\n"
                     "INSTRUCTION: Focus primarily on the user's latest message. "
                     "Use the chat history ONLY for context if relevant. "
-                    "If the latest request is unrelated to previous messages, treat it as a new topic."
+                    "If the latest request is unrelated to previous messages, treat it as a new topic. "
+                    "IMPORTANT: Keep your response concise and under 1900 characters to fit in a Discord message."
                 )
 
                 # Construct Message Content (Multimodal)
