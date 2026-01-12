@@ -36,7 +36,10 @@ class PersonaSelect(discord.ui.Select):
         """, (interaction.guild.id, persona_id))
         await db.conn.commit()
         
-        await interaction.response.send_message(f"✅ Switched persona to **{name}**!", ephemeral=False)
+        # Disable the dropdown
+        self.disabled = True
+        # Edit original message to show disabled view
+        await interaction.response.edit_message(content=f"✅ Switched persona to **{name}**!", view=self.view)
 
 class PersonaView(discord.ui.View):
     def __init__(self, personas, author_id):
