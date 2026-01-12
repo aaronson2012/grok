@@ -74,7 +74,7 @@ class Chat(commands.Cog):
                     content = msg.content.replace(f"<@{self.bot.user.id}>", "").strip()
                     
                     if role == "user":
-                        content = f"[{msg.author.display_name}]: {content}"
+                        content = f"[{msg.author.id}]: {content}"
                         
                     if content:
                         history.insert(0, {"role": role, "content": content})
@@ -118,14 +118,16 @@ class Chat(commands.Cog):
                     "INSTRUCTION: Focus primarily on the user's latest message. "
                     "Use the chat history ONLY for context if relevant. "
                     "If the latest request is unrelated to previous messages, treat it as a new topic. "
-                    "Users are identified by [Name] at the start of their messages. Address them by name when appropriate. "
+                    "Users are identified by [User ID] at the start of their messages. "
+                    "To address a user, use the format <@User ID>. Do NOT use their display name in brackets. "
+                    "Example: If you see '[12345]: Hello', reply with 'Hi <@12345>!'. "
                     "IMPORTANT: Keep your response concise and under 1900 characters to fit in a Discord message. "
                     "Use emojis naturally (about once every 2-3 sentences). Use a mix of standard Unicode emojis and the provided Custom Server Emojis. "
                     "Prefer the Custom Emojis when they fit the specific context or emotion perfectly."
                 )
 
                 # Construct Message Content (Multimodal)
-                clean_content_with_name = f"[{message.author.display_name}]: {clean_content}"
+                clean_content_with_name = f"[{message.author.id}]: {clean_content}"
                 user_content = [{"type": "text", "text": clean_content_with_name}]
                 
                 # Add images if present
@@ -224,7 +226,7 @@ class Chat(commands.Cog):
         
         system_prompt = await db.get_guild_persona(ctx.guild.id) if ctx.guild else "You are a helpful assistant."
         
-        clean_content_with_name = f"[{ctx.author.display_name}]: {prompt}"
+        clean_content_with_name = f"[{ctx.author.id}]: {prompt}"
         
         ai_msg = await ai_service.generate_response(
             system_prompt=system_prompt,
