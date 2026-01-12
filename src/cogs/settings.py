@@ -13,7 +13,11 @@ class PersonaSelect(discord.ui.Select):
         self.author_id = author_id
         options = []
         for p in personas:
-            desc = (p['description'][:97] + '...') if len(p['description']) > 100 else p['description']
+            # Truncate description to approx 7 words / 50 chars
+            desc = p['description']
+            if len(desc) > 50:
+                desc = desc[:47] + "..."
+            
             options.append(discord.SelectOption(
                 label=p['name'],
                 description=desc,
@@ -163,9 +167,15 @@ class Settings(commands.Cog):
     @persona.command(name="switch", description="Switch the server's active persona")
     @discord.default_permissions(administrator=True)
     async def switch_persona(self, ctx: discord.ApplicationContext):
-        # Fetch available personas
-        async with db.conn.execute("SELECT id, name, description FROM personas ORDER BY name") as cursor:
-            personas = await cursor.fetchall()
+        # Fetch Standard first
+        async with db.conn.execute("SELECT id, name, description FROM personas WHERE name = 'Standard'") as cursor:
+            standard = await cursor.fetchall()
+            
+        # Fetch others alphabetical
+        async with db.conn.execute("SELECT id, name, description FROM personas WHERE name != 'Standard' ORDER BY name") as cursor:
+            others = await cursor.fetchall()
+            
+        personas = standard + others
             
         if not personas:
             await ctx.respond("No personas found!", ephemeral=False)
