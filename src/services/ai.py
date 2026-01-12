@@ -33,7 +33,7 @@ class AIService:
             }
         ]
 
-    async def generate_response(self, system_prompt: str, user_message: str | list, history: list[dict] = None, tools: list = None) -> any:
+    async def generate_response(self, system_prompt: str, user_message: str | list, history: list[dict] = None, tools: list | bool = None) -> any:
         """
         Generates a response from the AI model.
         Returns the full response message object (which might contain tool_calls).
@@ -59,6 +59,10 @@ class AIService:
                     "X-Title": "Grok Discord Bot",
                 }
             )
+            
+            if not response or not response.choices:
+                raise ValueError(f"Invalid response from API: {response}")
+                
             return response.choices[0].message
         except Exception as e:
             logger.error(f"Error generating AI response: {e}")
