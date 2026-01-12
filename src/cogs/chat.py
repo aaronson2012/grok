@@ -90,7 +90,8 @@ class Chat(commands.Cog):
                     "Use the chat history ONLY for context if relevant. "
                     "If the latest request is unrelated to previous messages, treat it as a new topic. "
                     "IMPORTANT: Keep your response concise and under 1900 characters to fit in a Discord message. "
-                    "Use the provided Custom Emojis naturally in your response (about once every 2-3 sentences), matching the tone."
+                    "Use emojis naturally (about once every 2-3 sentences). Use a mix of standard Unicode emojis and the provided Custom Server Emojis. "
+                    "Prefer the Custom Emojis when they fit the specific context or emotion perfectly."
                 )
 
                 # Construct Message Content (Multimodal)
