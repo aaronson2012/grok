@@ -6,6 +6,10 @@ import logging
 logger = logging.getLogger("grok.ai")
 
 class AIService:
+    """
+    Service for interacting with OpenRouter API (OpenAI-compatible).
+    Handles message generation and tool definition.
+    """
     def __init__(self):
         self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",

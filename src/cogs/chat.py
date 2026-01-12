@@ -16,6 +16,14 @@ from ..utils.chunker import chunk_text
 logger = logging.getLogger("grok.chat")
 
 class Chat(commands.Cog):
+    """
+    Discord Cog for handling chat interactions with the AI.
+    Features:
+    - Message history management
+    - Persona handling
+    - Multimodal support (images/GIFs)
+    - Tool execution (e.g. web search)
+    """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 

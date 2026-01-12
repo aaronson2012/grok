@@ -7,6 +7,10 @@ from .search import search_service
 logger = logging.getLogger("grok.tools")
 
 class ToolRegistry:
+    """
+    Registry for managing available tools for the AI model.
+    Allows registering tools with definitions and callbacks.
+    """
     def __init__(self):
         self._tools: dict[str, dict] = {}
 
