@@ -50,7 +50,7 @@ class PersonaDeleteSelect(discord.ui.Select):
         for p in personas:
             options.append(discord.SelectOption(
                 label=p['name'],
-                description=f"ID: {p['id']}",
+                description=p['description'][:97] + '...' if len(p['description']) > 100 else p['description'],
                 value=str(p['id'])
             ))
         super().__init__(placeholder="Select a persona to DELETE...", min_values=1, max_values=1, options=options)
