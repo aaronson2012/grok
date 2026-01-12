@@ -1,6 +1,7 @@
 import logging
 import httpx
 from ..config import config
+from ..utils.decorators import async_retry
 
 logger = logging.getLogger("grok.search")
 
@@ -9,6 +10,7 @@ class SearchService:
         self.api_key = config.BRAVE_SEARCH_API_KEY
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
 
+    @async_retry(retries=2, delay=1.0, exceptions=(httpx.HTTPError, httpx.TimeoutException))
     async def search(self, query: str, count: int = 5) -> str:
         """
         Performs a web search using Brave Search API and returns a formatted string.
@@ -47,6 +49,11 @@ class SearchService:
 
         except Exception as e:
             logger.error(f"Brave Search failed: {e}")
+            # If retry fails (or other exception), return error message
+            # But raise HTTP errors so retry catches them!
+            if isinstance(e, (httpx.HTTPError, httpx.TimeoutException)):
+                raise e
             return f"Search failed: {str(e)}"
+
 
 search_service = SearchService()

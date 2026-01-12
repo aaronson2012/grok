@@ -1,6 +1,7 @@
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIError, APITimeoutError, RateLimitError
 from ..config import config
 from .tools import tool_registry
+from ..utils.decorators import async_retry
 import logging
 
 logger = logging.getLogger("grok.ai")
@@ -20,6 +21,7 @@ class AIService:
         # Define available tools
         self.tools = tool_registry.get_definitions()
 
+    @async_retry(retries=3, delay=1.0, exceptions=(APIError, APITimeoutError, RateLimitError))
     async def generate_response(self, system_prompt: str, user_message: str | list, history: list[dict] = None, tools: list | bool = None) -> any:
         """
         Generates a response from the AI model.

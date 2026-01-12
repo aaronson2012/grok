@@ -3,6 +3,7 @@ import logging
 import inspect
 from typing import Callable, Any, Awaitable
 from .search import search_service
+from ..utils.calculator import calculate
 
 logger = logging.getLogger("grok.tools")
 
@@ -61,7 +62,9 @@ tool_registry = ToolRegistry()
 async def _web_search_wrapper(query: str) -> str:
     return await search_service.search(query)
 
-# Register web_search
+async def _calculate_wrapper(expression: str) -> str:
+    return calculate(expression)
+
 tool_registry.register(
     name="web_search",
     description="Search the web for current information, news, or facts.",
@@ -76,4 +79,20 @@ tool_registry.register(
         "required": ["query"]
     },
     func=_web_search_wrapper
+)
+
+tool_registry.register(
+    name="calculator",
+    description="Perform mathematical calculations. Supports basic arithmetic (+, -, *, /, **, %, //) and functions (sin, cos, sqrt, etc.).",
+    parameters={
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": "The mathematical expression to evaluate, e.g. '2 + 2 * 5' or 'sqrt(16)'"
+            }
+        },
+        "required": ["expression"]
+    },
+    func=_calculate_wrapper
 )
