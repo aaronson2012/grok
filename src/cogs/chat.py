@@ -2,8 +2,10 @@ import discord
 from discord.ext import commands
 from typing import override
 import logging
+import json
 from ..services.ai import ai_service
 from ..services.db import db
+from ..services.search import search_service
 
 logger = logging.getLogger("grok.chat")
 
@@ -18,39 +20,15 @@ class Chat(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        # Ignore own messages and other bots
         if message.author.bot:
             return
 
-        # Check if mentioned
-        # Note: process_commands in bot.py runs BEFORE this listener.
-        # If a command was executed, we might not want to chat?
-        # But commonly, if you mention the bot, you expect a chat unless it's a specific command syntax.
-        # If the user says "@Grok help", it triggers the help command AND this listener?
-        # To prevent double response, we can check if the message starts with the command prefix.
-        
-        # Since we removed the manual prefix check in bot.py due to the 'function' error,
-        # we can use 'await self.bot.get_prefix(message)' to check here if needed.
-        # But a simpler way is: if the message triggers a command, Context is created.
-        # However, checking context here is hard.
-        
-        # Simple heuristic: If it's a mention, we chat.
-        # If the user intentionally uses a command, they usually don't ONLY mention the bot.
-        # e.g. "!ping" vs "@Grok hello".
-        # Exception: "@Grok ping" (if mention is a prefix).
-        
         if self.bot.user.mentioned_in(message) and not message.mention_everyone:
-            # Avoid replying to itself or if it's a reply to someone else where the bot is just mentioned in passing?
-            # Ideally, we only reply if the bot is mentioned at the START or is the primary subject.
-            
             clean_content = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
-            
-            # If the content is empty (just a ping), maybe ignore or say "What's up?"
             if not clean_content:
                 clean_content = "Hello!"
 
             async with message.channel.typing():
-                # Retrieve history
                 history = []
                 async for msg in message.channel.history(limit=10, before=message):
                     if msg.author.bot and msg.author != self.bot.user:
@@ -61,13 +39,55 @@ class Chat(commands.Cog):
                     if content:
                         history.insert(0, {"role": role, "content": content})
 
-                response = await ai_service.generate_response(
-                    system_prompt=await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant.",
+                system_prompt = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
+
+                # First AI Call
+                ai_msg = await ai_service.generate_response(
+                    system_prompt=system_prompt,
                     user_message=clean_content,
                     history=history
                 )
-                
-                await message.reply(response, mention_author=False)
+
+                # Tool Execution Loop
+                if ai_msg.tool_calls:
+                    # Add the initial AI thought (tool call) to history context for the next turn
+                    # Note: We can't easily modify the 'history' list structure expected by 'generate_response' 
+                    # because it expects simple dicts. We need to construct the conversation flow.
+                    
+                    # For simplicity in this iteration:
+                    # 1. Execute tool
+                    # 2. Feed result back as a system/tool output
+                    # 3. Get final answer
+                    
+                    tool_call = ai_msg.tool_calls[0]
+                    if tool_call.function.name == "web_search":
+                        args = json.loads(tool_call.function.arguments)
+                        query = args.get("query")
+                        
+                        await message.channel.send(f"🔎 Searching for: *{query}*...")
+                        
+                        search_result = search_service.search(query)
+                        
+                        # Add the search context to the history for the final answer
+                        # We append it as a user message or system injection for simplicity with OpenRouter
+                        # "Tool" role support depends on the provider, so we'll inject it as context.
+                        context_injection = f"Tool Output for '{query}':\n{search_result}"
+                        history.append({"role": "system", "content": context_injection})
+                        
+                        # Second AI Call
+                        final_msg = await ai_service.generate_response(
+                            system_prompt=system_prompt,
+                            user_message=clean_content, # Re-send original prompt with added context
+                            history=history,
+                            tools=False # Prevent infinite loops
+                        )
+                        response_text = final_msg.content
+                    else:
+                        response_text = "I tried to use a tool I don't know."
+                else:
+                    response_text = ai_msg.content
+
+                await message.reply(response_text, mention_author=False)
 
     @discord.slash_command(name="chat", description="Start a new chat thread with Grok")
     async def chat(self, ctx: discord.ApplicationContext, prompt: str) -> None:
@@ -75,11 +95,30 @@ class Chat(commands.Cog):
         
         system_prompt = await db.get_guild_persona(ctx.guild.id) if ctx.guild else "You are a helpful assistant."
         
-        response = await ai_service.generate_response(
+        ai_msg = await ai_service.generate_response(
             system_prompt=system_prompt,
             user_message=prompt
         )
-        await ctx.respond(response)
+
+        if ai_msg.tool_calls:
+             tool_call = ai_msg.tool_calls[0]
+             if tool_call.function.name == "web_search":
+                args = json.loads(tool_call.function.arguments)
+                query = args.get("query")
+                
+                await ctx.followup.send(f"🔎 Searching for: *{query}*...")
+                search_result = search_service.search(query)
+                
+                # Simple recursion for Slash Command
+                final_msg = await ai_service.generate_response(
+                    system_prompt=system_prompt,
+                    user_message=f"{prompt}\n\n[Search Results]: {search_result}",
+                    tools=False
+                )
+                await ctx.followup.send(final_msg.content)
+        else:
+            await ctx.respond(ai_msg.content)
+
 
 def setup(bot: commands.Bot) -> None:
     bot.add_cog(Chat(bot))
