@@ -16,6 +16,7 @@ logger = logging.getLogger("grok.digest")
 class Digest(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.processing_users = set()
         self.digest_loop.start()
 
     def cog_unload(self):
@@ -92,6 +93,12 @@ class Digest(commands.Cog):
             if count >= 10:
                 await ctx.respond("❌ You can only have up to 10 topics.", ephemeral=True)
                 return
+        
+        # Check for duplicates
+        async with db.conn.execute("SELECT 1 FROM digest_topics WHERE user_id = ? AND guild_id = ? AND topic = ? COLLATE NOCASE", (ctx.user.id, ctx.guild.id, topic)) as cursor:
+            if await cursor.fetchone():
+                await ctx.respond(f"⚠️ You already have **{topic}** in your list.", ephemeral=True)
+                return
 
         await db.conn.execute("INSERT INTO digest_topics (user_id, guild_id, topic) VALUES (?, ?, ?)", (ctx.user.id, ctx.guild.id, topic))
         await db.conn.commit()
@@ -118,6 +125,12 @@ class Digest(commands.Cog):
     @digest.command(name="now", description="Trigger your daily digest immediately (for testing)")
     async def trigger_now(self, ctx: discord.ApplicationContext):
         await ctx.defer()
+        
+        # Concurrency check
+        if ctx.user.id in self.processing_users:
+            await ctx.followup.send("⏳ Your digest is already being generated! Please wait.")
+            return
+
         result = await self.send_digest(ctx.guild.id, ctx.user.id)
         if result:
             await ctx.followup.send("✅ Digest sent!")
@@ -205,6 +218,11 @@ class Digest(commands.Cog):
 
     async def send_digest(self, guild_id: int, user_id: int) -> bool:
         """Generates and sends the digest."""
+        if user_id in self.processing_users:
+            logger.info(f"Skipping digest for {user_id} - already processing")
+            return False
+            
+        self.processing_users.add(user_id)
         try:
             # 1. Get Channel
             async with db.conn.execute("SELECT channel_id FROM digest_configs WHERE guild_id = ?", (guild_id,)) as cursor:
@@ -225,7 +243,9 @@ class Digest(commands.Cog):
 
             # 2. Get Topics
             async with db.conn.execute("SELECT topic FROM digest_topics WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cursor:
-                topics = [row['topic'] for row in await cursor.fetchall()]
+                # Deduplicate topics (case-insensitive) just in case
+                raw_topics = [row['topic'] for row in await cursor.fetchall()]
+                topics = sorted(list(set(raw_topics)), key=str.lower)
             
             if not topics:
                 return False
@@ -287,6 +307,8 @@ class Digest(commands.Cog):
             logger.error(f"Failed to send digest to {user_id}: {e}")
             await db.log_error(e, {"context": "send_digest", "user_id": user_id})
             return False
+        finally:
+            self.processing_users.discard(user_id)
 
 def setup(bot: commands.Bot):
     bot.add_cog(Digest(bot))
