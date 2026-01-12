@@ -155,9 +155,8 @@ class Settings(commands.Cog):
     @persona.command(name="delete", description="Delete a custom persona")
     @discord.default_permissions(administrator=True)
     async def delete_persona(self, ctx: discord.ApplicationContext):
-        # Fetch deletable personas (exclude Standard and globals if preferred, 
-        # but for now assume admins can delete anything except 'Standard')
-        async with db.conn.execute("SELECT id, name FROM personas WHERE name != 'Standard' ORDER BY name") as cursor:
+        # Fetch deletable personas
+        async with db.conn.execute("SELECT id, name, description FROM personas WHERE name != 'Standard' ORDER BY name") as cursor:
             personas = await cursor.fetchall()
             
         if not personas:
