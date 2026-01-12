@@ -75,6 +75,30 @@ class Database:
             context TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS digest_configs (
+            guild_id INTEGER PRIMARY KEY,
+            channel_id INTEGER NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS user_digest_settings (
+            user_id INTEGER,
+            guild_id INTEGER,
+            timezone TEXT DEFAULT 'UTC',
+            daily_time TEXT DEFAULT '09:00', -- HH:MM format (24h)
+            last_sent_at TIMESTAMP,
+            PRIMARY KEY (user_id, guild_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS digest_topics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            topic TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id, guild_id) REFERENCES user_digest_settings(user_id, guild_id) ON DELETE CASCADE
+        );
         """
         try:
             await self.conn.executescript(schema)
