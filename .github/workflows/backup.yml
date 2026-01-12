@@ -22,14 +22,6 @@ jobs:
       - name: Install flyctl
         uses: superfly/flyctl-actions/setup-flyctl@master
 
-      - name: Install SSH Key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.FLY_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          # Add Fly's SSH host to known_hosts
-          ssh-keyscan -H ssh.fly.io >> ~/.ssh/known_hosts
-
       - name: Create Safe Backup on Server
         # Connect to the VM and run python to safely copy the DB
         # We use python's sqlite3 module to avoid dependency on sqlite3 binary version mismatch
