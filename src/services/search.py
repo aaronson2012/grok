@@ -9,7 +9,7 @@ class SearchService:
         self.api_key = config.BRAVE_SEARCH_API_KEY
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
 
-    def search(self, query: str, count: int = 5) -> str:
+    async def search(self, query: str, count: int = 5) -> str:
         """
         Performs a web search using Brave Search API and returns a formatted string.
         """
@@ -26,13 +26,8 @@ class SearchService:
                 "count": count
             }
             
-            # Using synchronous httpx for simplicity in this tool context, 
-            # though async would be better if we refactored the whole chain.
-            # Given the tool call wrapper in chat.py is synchronous in logic flow (awaiting the result),
-            # but runs in an async function, we should ideally use async httpx.
-            # However, to keep the interface simple and consistent with previous sync implementation:
-            with httpx.Client() as client:
-                response = client.get(self.base_url, headers=headers, params=params)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(self.base_url, headers=headers, params=params)
                 response.raise_for_status()
                 data = response.json()
 

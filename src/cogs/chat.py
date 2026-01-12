@@ -195,7 +195,7 @@ class Chat(commands.Cog):
                         
                         await message.channel.send(f"🔎 Searching for: *{query}*...")
                         
-                        search_result = search_service.search(query)
+                        search_result = await search_service.search(query)
                         
                         # Add the search context to the history for the final answer
                         # We append it as a user message or system injection for simplicity with OpenRouter
@@ -240,7 +240,7 @@ class Chat(commands.Cog):
                 query = args.get("query")
                 
                 await ctx.followup.send(f"🔎 Searching for: *{query}*...")
-                search_result = search_service.search(query)
+                search_result = await search_service.search(query)
                 
                 # Simple recursion for Slash Command
                 final_msg = await ai_service.generate_response(
