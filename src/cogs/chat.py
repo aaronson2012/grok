@@ -3,6 +3,9 @@ from discord.ext import commands
 from typing import override
 import logging
 import json
+import base64
+import io
+from PIL import Image
 from datetime import datetime
 from ..services.ai import ai_service
 from ..services.db import db
@@ -121,11 +124,43 @@ class Chat(commands.Cog):
                 
                 # Add images if present
                 for attachment in message.attachments:
-                    if attachment.content_type and attachment.content_type.startswith("image/"):
-                        user_content.append({
-                            "type": "image_url",
-                            "image_url": {"url": attachment.url}
-                        })
+                    if attachment.content_type:
+                        if attachment.content_type == "image/gif":
+                            try:
+                                # Process GIF
+                                image_data = await attachment.read()
+                                with Image.open(io.BytesIO(image_data)) as img:
+                                    # Calculate middle frame
+                                    if getattr(img, "is_animated", False):
+                                        middle_frame = img.n_frames // 2
+                                        img.seek(middle_frame)
+                                    
+                                    # Save frame to buffer
+                                    output_buffer = io.BytesIO()
+                                    # Convert to RGB to ensure compatibility (in case of palette mode)
+                                    img.convert("RGB").save(output_buffer, format="JPEG")
+                                    output_buffer.seek(0)
+                                    
+                                    # Convert to base64
+                                    base64_image = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
+                                    data_url = f"data:image/jpeg;base64,{base64_image}"
+                                    
+                                    user_content.append({
+                                        "type": "image_url",
+                                        "image_url": {"url": data_url}
+                                    })
+                            except Exception as e:
+                                logger.error(f"Failed to process GIF: {e}")
+                                # Fallback to original URL if processing fails
+                                user_content.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": attachment.url}
+                                })
+                        elif attachment.content_type.startswith("image/"):
+                            user_content.append({
+                                "type": "image_url",
+                                "image_url": {"url": attachment.url}
+                            })
 
                 # First AI Call
                 ai_msg = await ai_service.generate_response(
