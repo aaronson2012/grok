@@ -3,9 +3,42 @@ from discord.ext import commands
 from typing import override
 import logging
 from ..services.db import db
+from ..services.ai import ai_service
 from ..services.emoji_manager import emoji_manager
 
 logger = logging.getLogger("grok.settings")
+
+class PersonaSelect(discord.ui.Select):
+    def __init__(self, personas):
+        options = []
+        for p in personas:
+            # Truncate description to 100 chars
+            desc = (p['description'][:97] + '...') if len(p['description']) > 100 else p['description']
+            options.append(discord.SelectOption(
+                label=p['name'],
+                description=desc,
+                value=str(p['id'])
+            ))
+        super().__init__(placeholder="Select a persona...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        persona_id = int(self.values[0])
+        # Find name for response
+        name = next(opt.label for opt in self.options if opt.value == self.values[0])
+        
+        await db.conn.execute("""
+            INSERT INTO guild_configs (guild_id, active_persona_id) 
+            VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET active_persona_id = excluded.active_persona_id
+        """, (interaction.guild.id, persona_id))
+        await db.conn.commit()
+        
+        await interaction.response.send_message(f"✅ Switched persona to **{name}**!", ephemeral=False)
+
+class PersonaView(discord.ui.View):
+    def __init__(self, personas):
+        super().__init__()
+        self.add_item(PersonaSelect(personas))
 
 class Settings(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -18,41 +51,82 @@ class Settings(commands.Cog):
 
     persona = discord.SlashCommandGroup("persona", "Manage Grok's personality")
 
-    @persona.command(name="list", description="List available personas")
-    async def list_personas(self, ctx: discord.ApplicationContext):
-        # Fetch global personas + custom personas created by this guild (if implemented later)
-        # For now, just global
-        async with db.conn.execute("SELECT id, name, description FROM personas WHERE is_global = 1") as cursor:
-            personas = await cursor.fetchall()
-        
-        embed = discord.Embed(title="🎭 Available Personas", color=discord.Color.blue())
-        for p in personas:
-            embed.add_field(name=f"{p['name']} (ID: {p['id']})", value=p['description'], inline=False)
-        
-        await ctx.respond(embed=embed)
-
     @persona.command(name="switch", description="Switch the server's active persona")
     @discord.default_permissions(administrator=True)
-    async def switch_persona(self, ctx: discord.ApplicationContext, name: str):
-        # Find persona by name
+    async def switch_persona(self, ctx: discord.ApplicationContext):
+        # Fetch available personas
+        async with db.conn.execute("SELECT id, name, description FROM personas ORDER BY name") as cursor:
+            personas = await cursor.fetchall()
+            
+        if not personas:
+            await ctx.respond("No personas found!", ephemeral=True)
+            return
+
+        view = PersonaView(personas)
+        await ctx.respond("🎭 **Choose a Persona**:", view=view)
+
+    @persona.command(name="create", description="Create a new custom persona with AI assistance")
+    @discord.default_permissions(administrator=True)
+    async def create_persona(self, ctx: discord.ApplicationContext, name: str, description: str):
+        await ctx.defer()
+        
+        # Check uniqueness
+        async with db.conn.execute("SELECT 1 FROM personas WHERE name = ? COLLATE NOCASE", (name,)) as cursor:
+            if await cursor.fetchone():
+                await ctx.followup.send(f"❌ A persona named **{name}** already exists.", ephemeral=True)
+                return
+
+        # Generate System Prompt using AI
+        ai_prompt = (
+            f"Create a system prompt for a Discord bot persona named '{name}'. "
+            f"Description: {description}. "
+            "The prompt should be 2-3 sentences, instructing the AI on its tone, style, and behavior. "
+            "Start with 'You are...'"
+        )
+        
+        try:
+            # We use the text-only interface of generate_response
+            ai_msg = await ai_service.generate_response(
+                system_prompt="You are a prompt engineer.",
+                user_message=ai_prompt
+            )
+            system_prompt = ai_msg.content.strip()
+            
+            await db.conn.execute("""
+                INSERT INTO personas (name, description, system_prompt, is_global, created_by)
+                VALUES (?, ?, ?, 0, ?)
+            """, (name, description, system_prompt, ctx.author.id))
+            await db.conn.commit()
+            
+            embed = discord.Embed(title="✨ Persona Created", color=discord.Color.green())
+            embed.add_field(name="Name", value=name, inline=True)
+            embed.add_field(name="Description", value=description, inline=True)
+            embed.add_field(name="System Prompt", value=system_prompt, inline=False)
+            
+            await ctx.followup.send(embed=embed)
+            
+        except Exception as e:
+            await ctx.followup.send(f"❌ Failed to generate persona: {e}")
+
+    @persona.command(name="delete", description="Delete a custom persona")
+    @discord.default_permissions(administrator=True)
+    async def delete_persona(self, ctx: discord.ApplicationContext, name: str):
+        # Prevent deleting Standard
+        if name.lower() == "standard":
+            await ctx.respond("❌ You cannot delete the default 'Standard' persona.", ephemeral=True)
+            return
+
         async with db.conn.execute("SELECT id FROM personas WHERE name = ? COLLATE NOCASE", (name,)) as cursor:
             row = await cursor.fetchone()
         
         if not row:
-            await ctx.respond(f"❌ Persona '{name}' not found. Use `/persona list` to see available options.", ephemeral=True)
+            await ctx.respond(f"❌ Persona '{name}' not found.", ephemeral=True)
             return
-
-        persona_id = row['id']
-        
-        # Upsert into guild_configs
-        await db.conn.execute("""
-            INSERT INTO guild_configs (guild_id, active_persona_id) 
-            VALUES (?, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET active_persona_id = excluded.active_persona_id
-        """, (ctx.guild.id, persona_id))
+            
+        await db.conn.execute("DELETE FROM personas WHERE id = ?", (row['id'],))
         await db.conn.commit()
         
-        await ctx.respond(f"✅ Switched persona to **{name}**!")
+        await ctx.respond(f"🗑️ Deleted persona **{name}**.")
 
     @persona.command(name="current", description="Show the current active persona")
     async def current_persona(self, ctx: discord.ApplicationContext):

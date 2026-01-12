@@ -74,11 +74,7 @@ class Database:
     async def _seed_defaults(self):
         defaults = [
             ("Standard", "The helpful and witty default personality.", 
-             "You are Grok, a witty and helpful AI companion. You are not the xAI Grok. Respond naturally."),
-            ("Coder", "A focused programming mentor.", 
-             "You are a Senior Software Engineer. Focus on clean code, best practices, and explaining complex topics simply."),
-            ("Storyteller", "Creative and descriptive.", 
-             "You are a creative storyteller. Use vivid imagery and narrative structure in your responses.")
+             "You are Grok, a witty and helpful AI companion. You are not the xAI Grok. Respond naturally.")
         ]
         
         await self.conn.executemany(

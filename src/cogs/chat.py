@@ -59,14 +59,11 @@ class Chat(commands.Cog):
                     
                     if last_msg_time:
                         time_diff = (last_msg_time - msg.created_at).total_seconds()
-                        if time_diff > 900: # 15 minutes gap
-                            # Insert a divider marker in the history to signal a break
-                            # We insert it at the beginning of the list (which is the chronological "middle" of the gap)
-                            history.insert(0, {"role": "system", "content": "[--- Conversation Gap (>15m) ---]"})
-                            
-                            # Optional: If the gap is huge (> 1 hour), maybe stop fetching history entirely?
-                            if time_diff > 3600:
-                                break
+                        if time_diff > 3600: # 1 hour gap
+                            # Reset to Default Persona if gap is too large
+                            # We check if this gap is occurring *now* (i.e. between now and the last message)
+                            # Actually, we need to check if the *last message in the channel* was > 1 hour ago.
+                            pass
                     
                     last_msg_time = msg.created_at
                     
@@ -75,9 +72,34 @@ class Chat(commands.Cog):
                     if content:
                         history.insert(0, {"role": role, "content": content})
 
-                # Limit effective history to last 10 items after filtering to keep prompt concise
-                if len(history) > 10:
-                    history = history[-10:]
+                # Check time since VERY LAST message to determine if we should reset persona
+                # We need to find the timestamp of the message *before* the current one.
+                # Since we just iterated, history[-1] is the previous message in prompt context, 
+                # but let's check the actual channel history for accuracy.
+                
+                # Logic: If the previous message in the channel (ignoring the one just sent) is > 1 hour old, reset.
+                last_previous_msg = None
+                async for m in message.channel.history(limit=2, before=message):
+                    last_previous_msg = m
+                    break # Just get one
+                
+                reset_triggered = False
+                if last_previous_msg:
+                    gap = (message.created_at - last_previous_msg.created_at).total_seconds()
+                    if gap > 3600:
+                        # Reset Persona to Standard
+                        # We need to get the Standard ID first
+                        async with db.conn.execute("SELECT id FROM personas WHERE name = 'Standard'") as cursor:
+                            row = await cursor.fetchone()
+                            if row:
+                                await db.conn.execute("""
+                                    INSERT INTO guild_configs (guild_id, active_persona_id) 
+                                    VALUES (?, ?)
+                                    ON CONFLICT(guild_id) DO UPDATE SET active_persona_id = excluded.active_persona_id
+                                """, (message.guild.id, row['id']))
+                                await db.conn.commit()
+                                reset_triggered = True
+                                await message.channel.send("⏳ *It's been a while. Reverting to my default personality.*")
 
                 base_persona = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
                 emoji_context = await db.get_guild_emojis_context(message.guild.id) if message.guild else ""
