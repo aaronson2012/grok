@@ -70,7 +70,7 @@ class Settings(commands.Cog):
         else:
             await ctx.respond("🎭 Current Persona: **Standard** (Default)")
 
-    @persona.command(name="analyze_emojis", description="Force re-analyze server emojis")
+    @discord.slash_command(name="analyze_emojis", description="Force re-analyze server emojis")
     @discord.default_permissions(administrator=True)
     async def analyze_emojis(self, ctx: discord.ApplicationContext):
         await ctx.defer()
