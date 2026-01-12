@@ -12,6 +12,9 @@ primary_region = 'ord'
 [env]
   DATABASE_PATH = '/data/grok.db'
 
+[processes]
+  app = "python main.py"
+
 [[mounts]]
   source = 'grok_data'
   destination = '/data'
