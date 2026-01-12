@@ -5,3 +5,6 @@ openai==1.59.3
 aiosqlite==0.20.0
 httpx==0.28.1
 Pillow
+pytest==8.3.4
+pytest-asyncio==0.25.1
+pytest-mock==3.14.0

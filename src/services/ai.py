@@ -1,5 +1,6 @@
 from openai import AsyncOpenAI
 from ..config import config
+from .tools import tool_registry
 import logging
 
 logger = logging.getLogger("grok.ai")
@@ -13,25 +14,7 @@ class AIService:
         self.model = config.OPENROUTER_MODEL
         
         # Define available tools
-        self.tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search the web for current information, news, or facts.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query, e.g. 'latest release of Python', 'weather in Tokyo'"
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                }
-            }
-        ]
+        self.tools = tool_registry.get_definitions()
 
     async def generate_response(self, system_prompt: str, user_message: str | list, history: list[dict] = None, tools: list | bool = None) -> any:
         """
