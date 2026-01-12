@@ -40,9 +40,9 @@ class PersonaModal(discord.ui.Modal):
         super().__init__(title="Create New Persona")
         self.add_item(discord.ui.InputText(
             label="Describe the Persona",
-            placeholder="e.g. A sarcastic 1990s hacker who loves coffee...",
+            placeholder="e.g. Batman, or 'A sarcastic hacker'...",
             style=discord.InputTextStyle.paragraph,
-            min_length=10,
+            min_length=3,
             max_length=1000
         ))
 
@@ -51,12 +51,14 @@ class PersonaModal(discord.ui.Modal):
         user_input = self.children[0].value
         
         try:
-            # Generate Name and Prompt in one go
+            # Generate Name, Description, and Prompt
             ai_prompt = (
-                f"Based on this description: '{user_input}', generate:\n"
-                "1. A short, unique name (max 15 chars, no spaces).\n"
-                "2. A system prompt (2-3 sentences) for a Discord bot.\n"
-                "Format output strictly as: NAME: <name>\nPROMPT: <prompt>"
+                f"User Input: '{user_input}'\n\n"
+                "Task: Create a Discord bot persona based on this input.\n"
+                "Output strictly in this format:\n"
+                "NAME: <The direct character name or simple title. Max 15 chars. No spaces. e.g. 'Batman' not 'DarkKnight', 'Mario' not 'Plumber'>\n"
+                "DESCRIPTION: <A short 1-sentence summary of who this is>\n"
+                "PROMPT: <A 2-3 sentence system instruction. Start with 'You are...'>"
             )
             
             ai_msg = await ai_service.generate_response(
@@ -67,17 +69,21 @@ class PersonaModal(discord.ui.Modal):
             # Parse output
             content = ai_msg.content.strip()
             name = "Unknown"
+            description = "Custom Persona"
             prompt = "You are a helpful assistant."
             
             for line in content.split('\n'):
                 if line.startswith("NAME:"):
                     name = line.replace("NAME:", "").strip()
+                elif line.startswith("DESCRIPTION:"):
+                    description = line.replace("DESCRIPTION:", "").strip()
                 elif line.startswith("PROMPT:"):
                     prompt = line.replace("PROMPT:", "").strip()
             
             # Fallback if parsing fails
             if name == "Unknown":
                 name = user_input.split()[0][:15]
+                description = user_input[:50]
             
             # Check uniqueness
             async with db.conn.execute("SELECT 1 FROM personas WHERE name = ? COLLATE NOCASE", (name,)) as cursor:
@@ -87,7 +93,7 @@ class PersonaModal(discord.ui.Modal):
             await db.conn.execute("""
                 INSERT INTO personas (name, description, system_prompt, is_global, created_by)
                 VALUES (?, ?, ?, 0, ?)
-            """, (name, user_input, prompt, interaction.user.id))
+            """, (name, description, prompt, interaction.user.id))
             await db.conn.commit()
             
             embed = discord.Embed(title="✨ Persona Created", color=discord.Color.green())
