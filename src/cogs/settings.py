@@ -3,6 +3,7 @@ from discord.ext import commands
 from typing import override
 import logging
 from ..services.db import db
+from ..services.emoji_manager import emoji_manager
 
 logger = logging.getLogger("grok.settings")
 
@@ -68,6 +69,16 @@ class Settings(commands.Cog):
             await ctx.respond(f"🎭 Current Persona: **{row['name']}**\n*{row['description']}*")
         else:
             await ctx.respond("🎭 Current Persona: **Standard** (Default)")
+
+    @persona.command(name="analyze_emojis", description="Force re-analyze server emojis")
+    @discord.default_permissions(administrator=True)
+    async def analyze_emojis(self, ctx: discord.ApplicationContext):
+        await ctx.defer()
+        try:
+            count = await emoji_manager.analyze_guild_emojis(ctx.guild)
+            await ctx.followup.send(f"✅ Analysis complete! Processed **{count}** new/updated emojis.")
+        except Exception as e:
+            await ctx.followup.send(f"❌ Analysis failed: {e}")
 
 def setup(bot: commands.Bot) -> None:
     bot.add_cog(Settings(bot))
