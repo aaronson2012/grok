@@ -31,20 +31,50 @@ class Chat(commands.Cog):
 
             async with message.channel.typing():
                 history = []
-                async for msg in message.channel.history(limit=10, before=message):
+                last_msg_time = None
+                
+                # Fetch more messages to allow for filtering
+                async for msg in message.channel.history(limit=20, before=message):
                     if msg.author.bot and msg.author != self.bot.user:
                         continue
+                    
+                    # Time-Gating Logic
+                    # If this message is > 60 minutes older than the one after it (which we processed previously), 
+                    # we consider the context stale beyond this point.
+                    # Note: We are iterating backwards (newest to oldest).
+                    
+                    if last_msg_time:
+                        time_diff = (last_msg_time - msg.created_at).total_seconds()
+                        if time_diff > 900: # 15 minutes gap
+                            # Insert a divider marker in the history to signal a break
+                            # We insert it at the beginning of the list (which is the chronological "middle" of the gap)
+                            history.insert(0, {"role": "system", "content": "[--- Conversation Gap (>15m) ---]"})
+                            
+                            # Optional: If the gap is huge (> 1 hour), maybe stop fetching history entirely?
+                            if time_diff > 3600:
+                                break
+                    
+                    last_msg_time = msg.created_at
                     
                     role = "assistant" if msg.author == self.bot.user else "user"
                     content = msg.content.replace(f"<@{self.bot.user.id}>", "").strip()
                     if content:
                         history.insert(0, {"role": role, "content": content})
 
+                # Limit effective history to last 10 items after filtering to keep prompt concise
+                if len(history) > 10:
+                    history = history[-10:]
+
                 base_persona = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
                 
-                # Inject Date Context
+                # Inject Date & Focus Instruction
                 current_date = datetime.now().strftime("%Y-%m-%d")
-                system_prompt = f"Current Date: {current_date}\n{base_persona}"
+                system_prompt = (
+                    f"Current Date: {current_date}\n{base_persona}\n\n"
+                    "INSTRUCTION: Focus primarily on the user's latest message. "
+                    "Use the chat history ONLY for context if relevant. "
+                    "If the latest request is unrelated to previous messages, treat it as a new topic."
+                )
 
                 # Construct Message Content (Multimodal)
                 user_content = [{"type": "text", "text": clean_content}]
