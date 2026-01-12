@@ -7,6 +7,7 @@ from datetime import datetime
 from ..services.ai import ai_service
 from ..services.db import db
 from ..services.search import search_service
+from ..utils.chunker import chunk_text
 
 logger = logging.getLogger("grok.chat")
 
@@ -133,7 +134,9 @@ class Chat(commands.Cog):
                 else:
                     response_text = ai_msg.content
 
-                await message.reply(response_text, mention_author=False)
+                # Split and send chunks if too long
+                for chunk in chunk_text(response_text):
+                    await message.reply(chunk, mention_author=False)
 
     @discord.slash_command(name="chat", description="Start a new chat thread with Grok")
     async def chat(self, ctx: discord.ApplicationContext, prompt: str) -> None:
