@@ -255,8 +255,24 @@ class Digest(commands.Cog):
             date_str = datetime.now().strftime("%Y-%m-%d")
             thread_name = f"Daily Digest for {user.display_name} - {date_str}"
             
+            async with db.conn.execute("SELECT timezone FROM user_digest_settings WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cursor:
+                row = await cursor.fetchone()
+                timezone_str = row['timezone'] if row else 'UTC'
+            
             try:
-                start_msg = await channel.send(f"📰 **Daily Digest** for {user.mention} | {date_str}")
+                user_tz = ZoneInfo(timezone_str)
+                current_hour = datetime.now(user_tz).hour
+                if 5 <= current_hour < 12:
+                    greeting = "Good morning"
+                elif 12 <= current_hour < 18:
+                    greeting = "Good afternoon"
+                else:
+                    greeting = "Good evening"
+            except Exception:
+                greeting = "Hello"
+
+            try:
+                start_msg = await channel.send(f"📰 **{greeting}, {user.mention}!** Here is your Daily Digest for {date_str}")
                 thread = await start_msg.create_thread(name=thread_name, auto_archive_duration=1440)
             except Exception as e:
                 logger.error(f"Failed to create thread: {e}")
@@ -277,11 +293,11 @@ class Digest(commands.Cog):
                     f"Search Results:\n{search_results}\n\n"
                     "Task: Write a short, engaging summary of the news for this topic. "
                     "Include 1-2 key links if available. "
-                    "Format with Markdown."
+                    "Format with Markdown. Do NOT include greetings (like Good morning)."
                 )
                 
                 ai_response = await ai_service.generate_response(
-                    system_prompt="You are a news anchor providing a daily digest.",
+                    system_prompt="You are a news anchor providing a daily digest. Jump straight into the news.",
                     user_message=prompt
                 )
                 
