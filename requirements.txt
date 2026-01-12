@@ -1,7 +1,7 @@
-py-cord>=2.6.1
-python-dotenv>=1.0.1
-aiohttp>=3.11.11
-openai>=1.59.0
-aiosqlite>=0.20.0
-httpx>=0.28.1
-duckduckgo-search>=7.0.0
+py-cord==2.6.1
+python-dotenv==1.0.1
+aiohttp==3.11.11
+openai==1.59.3
+aiosqlite==0.20.0
+httpx==0.28.1
+duckduckgo-search==7.2.1
