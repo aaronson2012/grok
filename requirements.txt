@@ -4,4 +4,3 @@ aiohttp==3.11.11
 openai==1.59.3
 aiosqlite==0.20.0
 httpx==0.28.1
-duckduckgo-search==7.2.1
