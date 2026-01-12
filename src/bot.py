@@ -30,8 +30,8 @@ class GrokBot(commands.Bot):
         # Sync commands
         try:
             # sync_commands returns a list of commands, or raises error
-            synced = await self.sync_commands()
-            logger.info(f"Synced {len(synced)} commands")
+            await self.sync_commands()
+            logger.info(f"Synced commands successfully")
         except Exception as e:
             logger.error(f"Failed to sync commands: {e}")
 
