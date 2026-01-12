@@ -14,7 +14,8 @@ class GrokBot(commands.Bot):
         super().__init__(
             command_prefix=commands.when_mentioned_or("!"),
             intents=discord.Intents.all(),
-            help_command=None
+            help_command=None,
+            debug_guilds=[691837132981141615, 1415186232404742177]
         )
     
     async def on_ready(self):
