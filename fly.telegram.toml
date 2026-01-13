@@ -8,7 +8,7 @@ primary_region = 'iad'
   DATABASE_PATH = '/data/grok.db'
 
 [processes]
-  app = "python tg.py"
+  app = "python bot_telegram.py"
 
 [[mounts]]
   source = 'grok_data'
