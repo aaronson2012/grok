@@ -78,7 +78,7 @@ class Database:
 
         CREATE TABLE IF NOT EXISTS digest_configs (
             guild_id INTEGER PRIMARY KEY,
-            channel_id INTEGER NOT NULL,
+            channel_id INTEGER,
             max_topics INTEGER DEFAULT 10,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -105,13 +105,34 @@ class Database:
             await self.conn.executescript(schema)
             await self.conn.commit()
             
-            # Check if max_topics exists in digest_configs
+            # Migration: max_topics column
             try:
                 await self.conn.execute("ALTER TABLE digest_configs ADD COLUMN max_topics INTEGER DEFAULT 10")
                 await self.conn.commit()
                 logger.info("Applied migration: Added max_topics to digest_configs")
             except Exception:
                 pass
+            
+            # Migration: make channel_id nullable by recreating table
+            try:
+                async with self.conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='digest_configs'") as cursor:
+                    row = await cursor.fetchone()
+                    if row and "NOT NULL" in row[0] and "channel_id" in row[0]:
+                        await self.conn.executescript("""
+                            CREATE TABLE IF NOT EXISTS digest_configs_new (
+                                guild_id INTEGER PRIMARY KEY,
+                                channel_id INTEGER,
+                                max_topics INTEGER DEFAULT 10,
+                                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            );
+                            INSERT OR IGNORE INTO digest_configs_new SELECT guild_id, channel_id, max_topics, updated_at FROM digest_configs;
+                            DROP TABLE digest_configs;
+                            ALTER TABLE digest_configs_new RENAME TO digest_configs;
+                        """)
+                        await self.conn.commit()
+                        logger.info("Applied migration: Made channel_id nullable in digest_configs")
+            except Exception as e:
+                logger.warning(f"Migration check for channel_id failed (may be fine): {e}")
             
             # Seed default personas if table is empty
             async with self.conn.execute("SELECT COUNT(*) FROM personas") as cursor:
