@@ -7,9 +7,10 @@ import zoneinfo
 from zoneinfo import ZoneInfo
 from typing import List, Optional
 
-from ..services.db import db
+from ..services.db import db, get_recent_digest_headlines, save_digest_headline
 from ..services.ai import ai_service
 from ..services.search import search_service
+from ..utils.chunker import chunk_text
 
 logger = logging.getLogger("grok.digest")
 
@@ -273,8 +274,6 @@ class Digest(commands.Cog):
 
             # 3. Create Thread
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-            date_str = datetime.now().strftime("%Y-%m-%d")
-            thread_name = f"Daily Digest for {user.display_name} - {date_str}"
             
             async with db.conn.execute("SELECT timezone FROM user_digest_settings WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cursor:
                 row = await cursor.fetchone()
@@ -282,7 +281,15 @@ class Digest(commands.Cog):
             
             try:
                 user_tz = ZoneInfo(timezone_str)
-                current_hour = datetime.now(user_tz).hour
+            except Exception:
+                user_tz = ZoneInfo('UTC')
+            
+            now_user = datetime.now(user_tz)
+            date_str = now_user.strftime("%Y-%m-%d")
+            thread_name = f"Daily Digest for {user.display_name} - {date_str}"
+            
+            try:
+                current_hour = now_user.hour
                 if 5 <= current_hour < 12:
                     greeting = "Good morning"
                 elif 12 <= current_hour < 18:
@@ -301,34 +308,66 @@ class Digest(commands.Cog):
 
             # 4. Process Topics
             for topic in topics:
-                # A. Search
-                search_results = await search_service.search(f"{topic} news today", count=3)
+                recent_headlines = await get_recent_digest_headlines(user_id, guild_id, topic)
                 
-                # B. Summarize with AI
+                search_results = await search_service.search(f"{topic} news today", count=5)
+                
                 if "No results found" in search_results:
                     await thread.send(f"**{topic}**\nNo recent news found.")
                     continue
 
+                history_context = ""
+                if recent_headlines:
+                    history_context = (
+                        "\n\nPreviously reported stories (DO NOT repeat these):\n"
+                        + "\n".join(f"- {h}" for h in recent_headlines[:20])
+                    )
+
                 prompt = (
                     f"Topic: {topic}\n"
-                    f"Search Results:\n{search_results}\n\n"
-                    "Task: Write a short, engaging summary of the news for this topic. "
+                    f"Search Results:\n{search_results}"
+                    f"{history_context}\n\n"
+                    "Task: Write a short, engaging summary of NEW news for this topic. "
+                    "Skip any stories similar to the previously reported ones. "
                     "Include 1-2 key links if available. "
-                    "Format with Markdown. Do NOT include greetings (like Good morning)."
+                    "Format with Markdown. Do NOT include greetings.\n\n"
+                    "At the end, list the headlines you covered in this format:\n"
+                    "HEADLINES_COVERED:\n- headline 1\n- headline 2"
                 )
                 
                 ai_response = await ai_service.generate_response(
-                    system_prompt="You are a news anchor providing a daily digest. Jump straight into the news.",
+                    system_prompt="You are a news anchor providing a daily digest. Jump straight into the news. Avoid repeating old stories.",
                     user_message=prompt
                 )
                 
                 content = ai_response.content
                 
-                # Chunking just in case
-                if len(content) > 1900:
-                    content = content[:1900] + "..."
-
-                await thread.send(f"### {topic}\n{content}")
+                display_content = content
+                headlines_to_save = []
+                if "HEADLINES_COVERED:" in content:
+                    parts = content.split("HEADLINES_COVERED:")
+                    display_content = parts[0].strip()
+                    if len(parts) > 1:
+                        for line in parts[1].strip().split("\n"):
+                            line = line.strip().lstrip("-").strip()
+                            if line:
+                                headlines_to_save.append(line)
+                
+                for headline in headlines_to_save:
+                    await save_digest_headline(user_id, guild_id, topic, headline)
+                
+                header = f"### {topic}\n"
+                first_chunk_limit = 1900 - len(header)
+                
+                if len(display_content) <= first_chunk_limit:
+                    await thread.send(f"{header}{display_content}")
+                else:
+                    chunks = chunk_text(display_content, chunk_size=1900)
+                    for i, chunk in enumerate(chunks):
+                        if i == 0:
+                            await thread.send(f"{header}{chunk}")
+                        else:
+                            await thread.send(chunk)
 
             # 5. Update last_sent_at
             await db.conn.execute("""

@@ -100,6 +100,19 @@ class Database:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id, guild_id) REFERENCES user_digest_settings(user_id, guild_id) ON DELETE CASCADE
         );
+
+        CREATE TABLE IF NOT EXISTS digest_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            guild_id INTEGER NOT NULL,
+            topic TEXT NOT NULL,
+            headline TEXT NOT NULL,
+            url TEXT,
+            sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_digest_history_lookup 
+        ON digest_history(user_id, guild_id, topic, sent_at);
         """
         try:
             await self.conn.executescript(schema)
@@ -250,3 +263,28 @@ class Database:
             logger.error(f"Original error: {error}")
 
 db = Database()
+
+async def get_recent_digest_headlines(user_id: int, guild_id: int, topic: str, days: int = 7) -> list[str]:
+    query = """
+    SELECT headline FROM digest_history 
+    WHERE user_id = ? AND guild_id = ? AND topic = ? COLLATE NOCASE
+    AND sent_at > datetime('now', ?)
+    ORDER BY sent_at DESC
+    LIMIT 50
+    """
+    async with db.conn.execute(query, (user_id, guild_id, topic, f'-{days} days')) as cursor:
+        rows = await cursor.fetchall()
+    return [row['headline'] for row in rows]
+
+async def save_digest_headline(user_id: int, guild_id: int, topic: str, headline: str, url: str = None):
+    query = """
+    INSERT INTO digest_history (user_id, guild_id, topic, headline, url)
+    VALUES (?, ?, ?, ?, ?)
+    """
+    await db.conn.execute(query, (user_id, guild_id, topic, headline, url))
+    await db.conn.commit()
+
+async def cleanup_old_digest_history(days: int = 30):
+    query = "DELETE FROM digest_history WHERE sent_at < datetime('now', ?)"
+    await db.conn.execute(query, (f'-{days} days',))
+    await db.conn.commit()
