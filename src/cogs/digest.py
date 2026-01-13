@@ -329,7 +329,9 @@ class Digest(commands.Cog):
                     f"{history_context}\n\n"
                     "Task: Write a short, engaging summary of NEW news for this topic. "
                     "Skip any stories similar to the previously reported ones. "
-                    "Include 1-2 key links if available. "
+                    "If ALL stories in the search results are repeats or very similar to previously reported ones, "
+                    "simply respond with: NO_NEW_DEVELOPMENTS\n\n"
+                    "Otherwise, include 1-2 key links if available. "
                     "Format with Markdown. Do NOT include greetings.\n\n"
                     "At the end, list the headlines you covered in this format:\n"
                     "HEADLINES_COVERED:\n- headline 1\n- headline 2"
@@ -341,6 +343,10 @@ class Digest(commands.Cog):
                 )
                 
                 content = ai_response.content
+                
+                if "NO_NEW_DEVELOPMENTS" in content:
+                    await thread.send(f"### {topic}\nNo new developments since the last update.")
+                    continue
                 
                 display_content = content
                 headlines_to_save = []
