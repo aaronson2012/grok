@@ -332,7 +332,11 @@ class Digest(commands.Cog):
                     "If ALL stories in the search results are repeats or very similar to previously reported ones, "
                     "simply respond with: NO_NEW_DEVELOPMENTS\n\n"
                     "Otherwise, include 1-2 key links if available. "
-                    "Format with Markdown. Do NOT include greetings.\n\n"
+                    "Format with Markdown. Do NOT include greetings.\n"
+                    "IMPORTANT: Keep markdown links on a SINGLE LINE - never break [text](url) across lines.\n\n"
+                    "Start your response with a clean, title-cased section header for this topic. "
+                    "Format: SECTION_TITLE: Your Polished Title Here\n"
+                    "Example: If topic is 'ai vibe coding', use 'SECTION_TITLE: AI Vibe Coding' or 'SECTION_TITLE: The Rise of Vibe Coding'\n\n"
                     "At the end, list the headlines you covered in this format:\n"
                     "HEADLINES_COVERED:\n- headline 1\n- headline 2"
                 )
@@ -345,13 +349,22 @@ class Digest(commands.Cog):
                 content = ai_response.content
                 
                 if "NO_NEW_DEVELOPMENTS" in content:
-                    await thread.send(f"### {topic}\nNo new developments since the last update.")
+                    await thread.send(f"### {topic.title()}\nNo new developments since the last update.")
                     continue
                 
+                section_title = topic.title()
                 display_content = content
+                
+                if "SECTION_TITLE:" in content:
+                    lines = content.split("\n", 1)
+                    first_line = lines[0]
+                    if "SECTION_TITLE:" in first_line:
+                        section_title = first_line.split("SECTION_TITLE:", 1)[1].strip()
+                        display_content = lines[1] if len(lines) > 1 else ""
+                
                 headlines_to_save = []
-                if "HEADLINES_COVERED:" in content:
-                    parts = content.split("HEADLINES_COVERED:")
+                if "HEADLINES_COVERED:" in display_content:
+                    parts = display_content.split("HEADLINES_COVERED:")
                     display_content = parts[0].strip()
                     if len(parts) > 1:
                         for line in parts[1].strip().split("\n"):
@@ -362,7 +375,7 @@ class Digest(commands.Cog):
                 for headline in headlines_to_save:
                     await save_digest_headline(user_id, guild_id, topic, headline)
                 
-                header = f"### {topic}\n"
+                header = f"### {section_title}\n"
                 first_chunk_limit = 1900 - len(header)
                 
                 if len(display_content) <= first_chunk_limit:
