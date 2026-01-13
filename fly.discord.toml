@@ -8,7 +8,7 @@ primary_region = 'ord'
   DATABASE_PATH = '/data/grok.db'
 
 [processes]
-  app = "python discord.py"
+  app = "python bot_discord.py"
 
 [[mounts]]
   source = 'grok_data'
