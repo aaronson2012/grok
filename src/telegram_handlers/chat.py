@@ -164,13 +164,13 @@ async def _build_message_history(message, context) -> list[dict]:
     reply_chain = []
     current = message.reply_to_message
 
-    for _ in range(20):
+    for _ in range(300):
         if not current:
             break
 
         if last_msg_time:
             time_diff = (last_msg_time - current.date).total_seconds()
-            if time_diff > 3600:
+            if time_diff > 86400:
                 break
 
         last_msg_time = current.date

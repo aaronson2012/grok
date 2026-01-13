@@ -56,13 +56,13 @@ class Chat(commands.Cog):
         history = []
         last_msg_time = None
         
-        async for msg in message.channel.history(limit=20, before=message):
+        async for msg in message.channel.history(limit=300, before=message):
             if msg.author.bot and msg.author != self.bot.user:
                 continue
             
             if last_msg_time:
                 time_diff = (last_msg_time - msg.created_at).total_seconds()
-                if time_diff > 3600:
+                if time_diff > 86400:
                     break
             
             last_msg_time = msg.created_at
@@ -84,7 +84,7 @@ class Chat(commands.Cog):
         
         if last_previous_msg:
             gap = (message.created_at - last_previous_msg.created_at).total_seconds()
-            if gap > 3600:
+            if gap > 86400:
                 async with db.conn.execute("SELECT id FROM personas WHERE name = 'Standard'") as cursor:
                     row = await cursor.fetchone()
                     if row:
