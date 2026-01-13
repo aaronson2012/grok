@@ -11,6 +11,7 @@ from ..services.ai import ai_service
 from ..services.db import db
 from ..services.tools import tool_registry
 from ..utils.chunker import chunk_text
+from ..utils.telegram_format import markdown_to_telegram_html
 
 logger = logging.getLogger("grok.telegram.chat")
 
@@ -82,7 +83,8 @@ async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         response_text = ai_msg.content
 
     for chunk in chunk_text(response_text, chunk_size=4000):
-        await update.message.reply_text(chunk)
+        html_chunk = markdown_to_telegram_html(chunk)
+        await update.message.reply_text(html_chunk, parse_mode="HTML")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -133,14 +135,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         response_text = ai_msg.content
 
     for chunk in chunk_text(response_text, chunk_size=4000):
-        await message.reply_text(chunk)
+        html_chunk = markdown_to_telegram_html(chunk)
+        await message.reply_text(html_chunk, parse_mode="HTML")
 
-    if summary_data:
-        last_summarized_id = summary_data.get("last_msg_id", 0)
-        unsummarized_msgs = [m for m in history if m.get("id", 0) > last_summarized_id]
+    # Include current exchange for summarization (both user message and bot response)
+    current_exchange = [
+        {"role": "user", "content": f"[{user_id}]: {text}", "id": message.message_id},
+        {"role": "assistant", "content": response_text, "id": message.message_id},
+    ]
+    messages_to_check = history + current_exchange
 
-        if len(unsummarized_msgs) >= 10:
-            await _update_summary(chat_id, current_summary, unsummarized_msgs)
+    # Determine unsummarized messages (allow creation even without prior summary)
+    last_summarized_id = summary_data["last_msg_id"] if summary_data else 0
+    unsummarized_msgs = [m for m in messages_to_check if m.get("id", 0) > last_summarized_id]
+
+    # Summarize after each exchange (threshold=2: 1 user msg + 1 bot response)
+    if len(unsummarized_msgs) >= 2:
+        await _update_summary(chat_id, current_summary, unsummarized_msgs)
 
 
 async def _build_message_history(message, context) -> list[dict]:
