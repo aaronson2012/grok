@@ -14,7 +14,7 @@ from ..utils.chunker import chunk_text
 
 logger = logging.getLogger("grok.telegram.chat")
 
-HELP_TEXT = """
+HELP_TEXT = r"""
 *Grok Telegram Bot*
 
 Talk to me by replying to my messages or mentioning me\!

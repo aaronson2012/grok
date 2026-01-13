@@ -17,6 +17,12 @@ logger = logging.getLogger("grok.telegram")
 async def post_init(application: Application) -> None:
     await db.connect()
     logger.info("Database connected")
+    
+    # Register message handler here after bot is initialized
+    application.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & (filters.REPLY | filters.Mention(application.bot.username or "")),
+        chat.handle_message
+    ))
 
 
 async def post_shutdown(application: Application) -> None:
@@ -61,11 +67,6 @@ def main():
     application.add_handler(CommandHandler("digest_time", digest.set_time_command))
     application.add_handler(CommandHandler("digest_timezone", digest.set_timezone_command))
     application.add_handler(CommandHandler("digest_now", digest.trigger_now_command))
-
-    application.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND & (filters.REPLY | filters.Mention(application.bot.username or "")),
-        chat.handle_message
-    ))
 
     application.add_error_handler(error_handler)
 
