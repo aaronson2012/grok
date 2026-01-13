@@ -1,6 +1,7 @@
 import sys
 import logging
 import asyncio
+from telegram import BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from src.config import config
@@ -17,6 +18,29 @@ logger = logging.getLogger("grok.telegram")
 async def post_init(application: Application) -> None:
     await db.connect()
     logger.info("Database connected")
+    
+    # Register commands for autocomplete menu
+    commands = [
+        BotCommand("start", "Start the bot"),
+        BotCommand("help", "Show help message"),
+        BotCommand("chat", "Chat with AI directly"),
+        BotCommand("persona", "Switch persona"),
+        BotCommand("persona_create", "Create new persona"),
+        BotCommand("persona_delete", "Delete a persona"),
+        BotCommand("persona_current", "Show current persona"),
+        BotCommand("digest_add", "Add a news topic"),
+        BotCommand("digest_remove", "Remove a topic"),
+        BotCommand("digest_list", "List your topics"),
+        BotCommand("digest_time", "Set delivery time"),
+        BotCommand("digest_timezone", "Set timezone"),
+        BotCommand("digest_now", "Trigger digest now"),
+        BotCommand("memory_view", "View channel memory"),
+        BotCommand("memory_clear", "Clear channel memory"),
+        BotCommand("logs_view", "View error logs"),
+        BotCommand("logs_clear", "Clear error logs"),
+    ]
+    await application.bot.set_my_commands(commands)
+    logger.info("Bot commands registered")
     
     # Register message handler here after bot is initialized
     application.add_handler(MessageHandler(
