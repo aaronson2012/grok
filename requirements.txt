@@ -1,4 +1,5 @@
 py-cord==2.6.1
+python-telegram-bot[job-queue]==21.10
 python-dotenv==1.0.1
 aiohttp==3.11.11
 openai==1.59.3

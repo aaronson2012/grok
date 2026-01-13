@@ -1,0 +1,21 @@
+app = 'grok-bot-telegram'
+primary_region = 'iad'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DATABASE_PATH = '/data/grok.db'
+
+[processes]
+  app = "python tg.py"
+
+[[mounts]]
+  source = 'grok_data'
+  destination = '/data'
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 512

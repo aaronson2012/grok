@@ -1,9 +1,4 @@
-# fly.toml app configuration file generated for grok-bot on 2026-01-12T00:41:51-06:00
-#
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-#
-
-app = 'grok-bot'
+app = 'grok-bot-discord'
 primary_region = 'ord'
 
 [build]
@@ -13,7 +8,7 @@ primary_region = 'ord'
   DATABASE_PATH = '/data/grok.db'
 
 [processes]
-  app = "python main.py"
+  app = "python discord.py"
 
 [[mounts]]
   source = 'grok_data'
