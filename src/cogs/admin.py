@@ -28,6 +28,7 @@ class Admin(commands.Cog):
     @memory.command(name="view", description="View the current long-term memory for a channel")
     @discord.default_permissions(administrator=True)
     async def memory_view(self, ctx: discord.ApplicationContext, channel: discord.TextChannel = None):
+        await ctx.defer(ephemeral=True)
         target_channel = channel or ctx.channel
         
         async with db.conn.execute(
@@ -54,6 +55,7 @@ class Admin(commands.Cog):
     @memory.command(name="clear", description="Clear the long-term memory for a channel")
     @discord.default_permissions(administrator=True)
     async def memory_clear(self, ctx: discord.ApplicationContext, channel: discord.TextChannel = None):
+        await ctx.defer(ephemeral=True)
         target_channel = channel or ctx.channel
         
         await db.conn.execute("DELETE FROM summaries WHERE channel_id = ?", (target_channel.id,))
@@ -68,6 +70,7 @@ class Admin(commands.Cog):
     @logs.command(name="view", description="View recent error logs")
     @discord.default_permissions(administrator=True)
     async def logs_view(self, ctx: discord.ApplicationContext, limit: int = 5):
+        await ctx.defer(ephemeral=True)
         if limit < 1 or limit > 20:
             limit = 5
             
@@ -92,7 +95,7 @@ class Admin(commands.Cog):
     @logs.command(name="clear", description="Clear all error logs")
     @discord.default_permissions(administrator=True)
     async def logs_clear(self, ctx: discord.ApplicationContext):
-        # Optional: Ask for confirmation? For now, just do it.
+        await ctx.defer(ephemeral=True)
         await db.conn.execute("DELETE FROM error_logs")
         await db.conn.commit()
         
@@ -101,6 +104,7 @@ class Admin(commands.Cog):
     @logs.command(name="details", description="View full details for a specific error ID")
     @discord.default_permissions(administrator=True)
     async def logs_details(self, ctx: discord.ApplicationContext, error_id: int):
+        await ctx.defer(ephemeral=True)
         async with db.conn.execute(
             "SELECT * FROM error_logs WHERE id = ?", 
             (error_id,)
