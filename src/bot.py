@@ -11,11 +11,16 @@ logger = logging.getLogger("grok.bot")
 
 class GrokBot(commands.Bot):
     def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+        intents.guilds = True
+        
         super().__init__(
             command_prefix=commands.when_mentioned_or("!"),
-            intents=discord.Intents.all(),
+            intents=intents,
             help_command=None,
-            debug_guilds=[691837132981141615, 1415186232404742177]
+            debug_guilds=config.DEBUG_GUILD_IDS or None
         )
     
     async def on_ready(self):

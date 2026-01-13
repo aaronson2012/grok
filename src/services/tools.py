@@ -43,7 +43,6 @@ class ToolRegistry:
         return [tool["definition"] for tool in self._tools.values()]
 
     async def execute(self, name: str, arguments: dict) -> str:
-        """Executes a tool by name with the given arguments."""
         if name not in self._tools:
             raise ValueError(f"Tool '{name}' not found.")
         
@@ -53,7 +52,7 @@ class ToolRegistry:
             return str(result)
         except Exception as e:
             logger.error(f"Error executing tool {name}: {e}")
-            return f"Error executing tool {name}: {str(e)}"
+            return f"Tool execution failed. Please try again."
 
 # Initialize registry
 tool_registry = ToolRegistry()

@@ -241,9 +241,6 @@ class Database:
             return row['system_prompt'] if row else "You are a helpful assistant."
 
     async def log_error(self, error: Exception, context: dict = None):
-        """
-        Logs an exception to the database with context.
-        """
         try:
             error_type = type(error).__name__
             message = str(error)
@@ -258,33 +255,32 @@ class Database:
             await self.conn.commit()
             logger.error(f"Logged error to DB: {error_type}: {message}")
         except Exception as e:
-            # Fallback if DB logging fails (e.g. DB locked or closed)
             logger.error(f"Failed to log error to DB: {e}")
             logger.error(f"Original error: {error}")
 
+    async def get_recent_digest_headlines(self, user_id: int, guild_id: int, topic: str, days: int = 7) -> list[str]:
+        query = """
+        SELECT headline FROM digest_history 
+        WHERE user_id = ? AND guild_id = ? AND topic = ? COLLATE NOCASE
+        AND sent_at > datetime('now', ?)
+        ORDER BY sent_at DESC
+        LIMIT 50
+        """
+        async with self.conn.execute(query, (user_id, guild_id, topic, f'-{days} days')) as cursor:
+            rows = await cursor.fetchall()
+        return [row['headline'] for row in rows]
+
+    async def save_digest_headline(self, user_id: int, guild_id: int, topic: str, headline: str, url: str = None):
+        query = """
+        INSERT INTO digest_history (user_id, guild_id, topic, headline, url)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        await self.conn.execute(query, (user_id, guild_id, topic, headline, url))
+        await self.conn.commit()
+
+    async def cleanup_old_digest_history(self, days: int = 30):
+        query = "DELETE FROM digest_history WHERE sent_at < datetime('now', ?)"
+        await self.conn.execute(query, (f'-{days} days',))
+        await self.conn.commit()
+
 db = Database()
-
-async def get_recent_digest_headlines(user_id: int, guild_id: int, topic: str, days: int = 7) -> list[str]:
-    query = """
-    SELECT headline FROM digest_history 
-    WHERE user_id = ? AND guild_id = ? AND topic = ? COLLATE NOCASE
-    AND sent_at > datetime('now', ?)
-    ORDER BY sent_at DESC
-    LIMIT 50
-    """
-    async with db.conn.execute(query, (user_id, guild_id, topic, f'-{days} days')) as cursor:
-        rows = await cursor.fetchall()
-    return [row['headline'] for row in rows]
-
-async def save_digest_headline(user_id: int, guild_id: int, topic: str, headline: str, url: str = None):
-    query = """
-    INSERT INTO digest_history (user_id, guild_id, topic, headline, url)
-    VALUES (?, ?, ?, ?, ?)
-    """
-    await db.conn.execute(query, (user_id, guild_id, topic, headline, url))
-    await db.conn.commit()
-
-async def cleanup_old_digest_history(days: int = 30):
-    query = "DELETE FROM digest_history WHERE sent_at < datetime('now', ?)"
-    await db.conn.execute(query, (f'-{days} days',))
-    await db.conn.commit()

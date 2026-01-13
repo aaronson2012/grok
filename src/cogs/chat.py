@@ -63,7 +63,7 @@ class Chat(commands.Cog):
             if last_msg_time:
                 time_diff = (last_msg_time - msg.created_at).total_seconds()
                 if time_diff > 3600:
-                    pass
+                    break
             
             last_msg_time = msg.created_at
             role = "assistant" if msg.author == self.bot.user else "user"
@@ -202,8 +202,7 @@ class Chat(commands.Cog):
                     try:
                         tool_result = await tool_registry.execute(func_name, args)
                     except Exception as e:
-                        tool_result = f"Error executing tool {func_name}: {e}"
-                        # Log tool failure to DB
+                        tool_result = "Tool execution failed. Please try again."
                         await db.log_error(e, {"context": "Tool Execution", "tool": func_name, "args": args, "guild_id": message.guild.id if message.guild else None})
                         
                     # Add the search context to the history for the final answer
@@ -261,6 +260,7 @@ class Chat(commands.Cog):
             logger.error(f"Failed to update summary: {e}")
 
     @discord.slash_command(name="chat", description="Start a new chat thread with Grok")
+    @commands.cooldown(1, 30, commands.BucketType.user)
     async def chat(self, ctx: discord.ApplicationContext, prompt: str) -> None:
         await ctx.defer()
         
@@ -287,7 +287,7 @@ class Chat(commands.Cog):
              try:
                 tool_result = await tool_registry.execute(func_name, args)
              except Exception as e:
-                tool_result = f"Error: {e}"
+                tool_result = "Tool execution failed. Please try again."
              
              # Simple recursion for Slash Command
              final_msg = await ai_service.generate_response(

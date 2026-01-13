@@ -7,7 +7,7 @@ import zoneinfo
 from zoneinfo import ZoneInfo
 from typing import List, Optional
 
-from ..services.db import db, get_recent_digest_headlines, save_digest_headline
+from ..services.db import db
 from ..services.ai import ai_service
 from ..services.search import search_service
 from ..utils.chunker import chunk_text
@@ -101,6 +101,11 @@ class Digest(commands.Cog):
 
     @topics.command(name="add", description="Add a topic to your digest")
     async def add_topic(self, ctx: discord.ApplicationContext, topic: str):
+        topic = topic[:100].strip()
+        if not topic:
+            await ctx.respond("❌ Topic cannot be empty.", ephemeral=True)
+            return
+            
         await self._ensure_user_settings(ctx.user.id, ctx.guild.id)
         
         limit = 10
@@ -145,6 +150,7 @@ class Digest(commands.Cog):
         await ctx.respond(f"**Your Digest Topics:**\n{topics_list}")
 
     @digest.command(name="now", description="Trigger your daily digest immediately (for testing)")
+    @commands.cooldown(1, 300, commands.BucketType.user)
     async def trigger_now(self, ctx: discord.ApplicationContext):
         await ctx.defer()
         
@@ -257,7 +263,7 @@ class Digest(commands.Cog):
             if not channel:
                 try:
                     channel = await self.bot.fetch_channel(channel_id)
-                except:
+                except discord.NotFound:
                     return False
             
             if not isinstance(channel, discord.TextChannel):
@@ -308,7 +314,7 @@ class Digest(commands.Cog):
 
             # 4. Process Topics
             for topic in topics:
-                recent_headlines = await get_recent_digest_headlines(user_id, guild_id, topic)
+                recent_headlines = await db.get_recent_digest_headlines(user_id, guild_id, topic)
                 
                 search_results = await search_service.search(f"{topic} news today", count=5)
                 
@@ -373,7 +379,7 @@ class Digest(commands.Cog):
                                 headlines_to_save.append(line)
                 
                 for headline in headlines_to_save:
-                    await save_digest_headline(user_id, guild_id, topic, headline)
+                    await db.save_digest_headline(user_id, guild_id, topic, headline)
                 
                 header = f"### {section_title}\n"
                 first_chunk_limit = 1900 - len(header)

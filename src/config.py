@@ -10,6 +10,7 @@ class Config:
     OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-3-flash-preview")
     PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
     DATABASE_PATH = os.getenv("DATABASE_PATH", "data/grok.db")
+    DEBUG_GUILD_IDS = [int(g) for g in os.getenv("DEBUG_GUILD_IDS", "").split(",") if g.strip()]
     
     @classmethod
     def validate(cls):

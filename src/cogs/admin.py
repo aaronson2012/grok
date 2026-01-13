@@ -2,6 +2,9 @@ import discord
 from discord.ext import commands
 from typing import override
 import logging
+import aiofiles
+import tempfile
+import os
 from ..services.db import db
 
 logger = logging.getLogger("grok.admin")
@@ -127,13 +130,18 @@ class Admin(commands.Cog):
         if len(full_report) < 1900:
             await ctx.respond(f"```\n{full_report}\n```", ephemeral=True)
         else:
-            with open("error_details.txt", "w") as f:
-                f.write(full_report)
-            await ctx.respond(
-                f"📄 Error #{error_id} Details:", 
-                file=discord.File("error_details.txt"),
-                ephemeral=True
-            )
+            fd, temp_path = tempfile.mkstemp(suffix=".txt", prefix="error_details_")
+            try:
+                async with aiofiles.open(temp_path, "w") as f:
+                    await f.write(full_report)
+                await ctx.respond(
+                    f"📄 Error #{error_id} Details:", 
+                    file=discord.File(temp_path, filename="error_details.txt"),
+                    ephemeral=True
+                )
+            finally:
+                os.close(fd)
+                os.unlink(temp_path)
 
 def setup(bot: commands.Bot) -> None:
     bot.add_cog(Admin(bot))

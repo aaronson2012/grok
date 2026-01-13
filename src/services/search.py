@@ -53,7 +53,7 @@ class SearchService:
                 
             await db.log_error(e, {"context": "SearchService.search", "query": query})
             
-            return f"Search failed: {str(e)}"
+            return "Search failed. Please try again."
 
 
 search_service = SearchService()

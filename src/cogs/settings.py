@@ -58,8 +58,8 @@ class PersonaView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(content="❌ Menu timed out.", view=self)
-            except:
-                pass # Message might be deleted
+            except discord.NotFound:
+                pass
 
 class PersonaDeleteSelect(discord.ui.Select):
     def __init__(self, personas, author_id):
@@ -100,7 +100,7 @@ class PersonaDeleteView(discord.ui.View):
         if self.message:
             try:
                 await self.message.edit(content="❌ Menu timed out.", view=self)
-            except:
+            except discord.NotFound:
                 pass
 
 class PersonaModal(discord.ui.Modal):
@@ -142,9 +142,9 @@ class PersonaModal(discord.ui.Modal):
             
             for line in content.split('\n'):
                 if line.startswith("NAME:"):
-                    name = line.replace("NAME:", "").strip()
+                    name = line.replace("NAME:", "").strip()[:50]
                 elif line.startswith("DESCRIPTION:"):
-                    description = line.replace("DESCRIPTION:", "").strip()
+                    description = line.replace("DESCRIPTION:", "").strip()[:200]
                 elif line.startswith("PROMPT:"):
                     prompt = line.replace("PROMPT:", "").strip()
             
@@ -172,7 +172,8 @@ class PersonaModal(discord.ui.Modal):
             await interaction.followup.send(embed=embed)
             
         except Exception as e:
-            await interaction.followup.send(f"❌ Creation failed: {e}")
+            logger.error(f"Persona creation failed: {e}")
+            await interaction.followup.send("❌ Creation failed. Please try again.")
 
 class Settings(commands.Cog):
 
@@ -219,6 +220,7 @@ class Settings(commands.Cog):
 
     @persona.command(name="create", description="Create a new custom persona with AI assistance")
     @discord.default_permissions(administrator=True)
+    @commands.cooldown(1, 60, commands.BucketType.user)
     async def create_persona(self, ctx: discord.ApplicationContext):
         modal = PersonaModal()
         await ctx.send_modal(modal)
@@ -258,13 +260,15 @@ class Settings(commands.Cog):
 
     @discord.slash_command(name="analyze_emojis", description="Force re-analyze server emojis")
     @discord.default_permissions(administrator=True)
+    @commands.cooldown(1, 300, commands.BucketType.guild)
     async def analyze_emojis(self, ctx: discord.ApplicationContext):
         await ctx.defer()
         try:
             count = await emoji_manager.analyze_guild_emojis(ctx.guild)
             await ctx.followup.send(f"✅ Analysis complete! Processed **{count}** new/updated emojis.")
         except Exception as e:
-            await ctx.followup.send(f"❌ Analysis failed: {e}")
+            logger.error(f"Emoji analysis failed: {e}")
+            await ctx.followup.send("❌ Analysis failed. Please try again.")
 
 def setup(bot: commands.Bot) -> None:
     bot.add_cog(Settings(bot))

@@ -55,4 +55,4 @@ async def test_execute_tool_exception(registry):
     )
 
     result = await registry.execute("fail", {})
-    assert "Error executing tool fail: Something went wrong" in result
+    assert "Tool execution failed" in result

@@ -54,4 +54,4 @@ async def test_search_error(search_service):
         MockClient.return_value.__aexit__.return_value = None
 
         result = await search_service.search("fail")
-        assert "Search failed: Network Error" in result
+        assert "Search failed" in result
