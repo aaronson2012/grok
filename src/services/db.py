@@ -105,6 +105,14 @@ class Database:
             await self.conn.executescript(schema)
             await self.conn.commit()
             
+            # Check if max_topics exists in digest_configs
+            try:
+                await self.conn.execute("ALTER TABLE digest_configs ADD COLUMN max_topics INTEGER DEFAULT 10")
+                await self.conn.commit()
+                logger.info("Applied migration: Added max_topics to digest_configs")
+            except Exception:
+                pass
+            
             # Seed default personas if table is empty
             async with self.conn.execute("SELECT COUNT(*) FROM personas") as cursor:
                 count = (await cursor.fetchone())[0]
