@@ -32,6 +32,21 @@ class Digest(commands.Cog):
 
     # --- Configuration Commands ---
 
+    @config.command(name="max_topics", description="Set the maximum number of digest topics per user (Admin only)")
+    @discord.default_permissions(administrator=True)
+    async def set_max_topics(self, ctx: discord.ApplicationContext, limit: int):
+        if limit < 1 or limit > 50:
+            await ctx.respond("❌ Limit must be between 1 and 50.", ephemeral=True)
+            return
+
+        await db.conn.execute("""
+            INSERT INTO digest_configs (guild_id, max_topics) 
+            VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET max_topics = excluded.max_topics
+        """, (ctx.guild.id, limit))
+        await db.conn.commit()
+        await ctx.respond(f"✅ Max topics per user set to **{limit}**.")
+
     @config.command(name="channel", description="Set the channel where digests will be posted (Admin only)")
     @discord.default_permissions(administrator=True)
     async def set_channel(self, ctx: discord.ApplicationContext, channel: discord.TextChannel):
@@ -87,11 +102,17 @@ class Digest(commands.Cog):
     async def add_topic(self, ctx: discord.ApplicationContext, topic: str):
         await self._ensure_user_settings(ctx.user.id, ctx.guild.id)
         
+        limit = 10
+        async with db.conn.execute("SELECT max_topics FROM digest_configs WHERE guild_id = ?", (ctx.guild.id,)) as cursor:
+            row = await cursor.fetchone()
+            if row and row['max_topics']:
+                limit = row['max_topics']
+
         # Check current count to prevent spam
         async with db.conn.execute("SELECT COUNT(*) FROM digest_topics WHERE user_id = ? AND guild_id = ?", (ctx.user.id, ctx.guild.id)) as cursor:
             count = (await cursor.fetchone())[0]
-            if count >= 10:
-                await ctx.respond("❌ You can only have up to 10 topics.", ephemeral=True)
+            if count >= limit:
+                await ctx.respond(f"❌ You can only have up to {limit} topics (Server Limit).", ephemeral=True)
                 return
         
         # Check for duplicates

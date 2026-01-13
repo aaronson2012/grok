@@ -79,6 +79,7 @@ class Database:
         CREATE TABLE IF NOT EXISTS digest_configs (
             guild_id INTEGER PRIMARY KEY,
             channel_id INTEGER NOT NULL,
+            max_topics INTEGER DEFAULT 10,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
