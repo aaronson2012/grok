@@ -8,33 +8,30 @@ logger = logging.getLogger("grok.search")
 
 class SearchService:
     def __init__(self):
-        self.api_key = config.BRAVE_SEARCH_API_KEY
-        self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self.api_key = config.PERPLEXITY_API_KEY
+        self.base_url = "https://api.perplexity.ai/search"
 
     @async_retry(retries=2, delay=1.0, exceptions=(httpx.HTTPError, httpx.TimeoutException))
     async def search(self, query: str, count: int = 5) -> str:
-        """
-        Performs a web search using Brave Search API and returns a formatted string.
-        """
         if not self.api_key:
-            return "Error: Brave Search API key is not configured."
+            return "Error: Perplexity API key is not configured."
 
         try:
             headers = {
-                "Accept": "application/json",
-                "X-Subscription-Token": self.api_key
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
             }
-            params = {
-                "q": query,
-                "count": count
+            payload = {
+                "query": query,
+                "max_results": count
             }
             
             async with httpx.AsyncClient() as client:
-                response = await client.get(self.base_url, headers=headers, params=params)
+                response = await client.post(self.base_url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
 
-            results = data.get("web", {}).get("results", [])
+            results = data.get("results", [])
             
             if not results:
                 return "No results found."
@@ -42,21 +39,18 @@ class SearchService:
             formatted = []
             for r in results:
                 title = r.get("title", "No Title")
-                desc = r.get("description", "No description")
+                desc = r.get("snippet", "No description")
                 url = r.get("url", "")
                 formatted.append(f"- **{title}**\n  {desc}\n  <{url}>")
             
             return "\n\n".join(formatted)
 
         except Exception as e:
-            logger.error(f"Brave Search failed: {e}")
+            logger.error(f"Perplexity Search failed: {e}")
             
-            # If retry fails (or other exception), return error message
-            # But raise HTTP errors so retry catches them!
             if isinstance(e, (httpx.HTTPError, httpx.TimeoutException)):
                 raise e
                 
-            # Log non-retriable (or final) errors to DB
             await db.log_error(e, {"context": "SearchService.search", "query": query})
             
             return f"Search failed: {str(e)}"

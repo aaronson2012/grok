@@ -12,25 +12,22 @@ def search_service():
 @pytest.mark.asyncio
 async def test_search_success(search_service):
     mock_response = {
-        "web": {
-            "results": [
-                {
-                    "title": "Test Result",
-                    "description": "This is a test",
-                    "url": "http://example.com"
-                }
-            ]
-        }
+        "results": [
+            {
+                "title": "Test Result",
+                "snippet": "This is a test",
+                "url": "http://example.com"
+            }
+        ]
     }
     
     with patch("httpx.AsyncClient") as MockClient:
         mock_client_instance = AsyncMock()
-        mock_client_instance.get.return_value = AsyncMock(
+        mock_client_instance.post.return_value = AsyncMock(
             status_code=200,
             json=lambda: mock_response,
             raise_for_status=lambda: None
         )
-        # Mocking __aenter__ and __aexit__ for async with context manager
         MockClient.return_value.__aenter__.return_value = mock_client_instance
         MockClient.return_value.__aexit__.return_value = None
 
@@ -45,13 +42,13 @@ async def test_search_no_api_key():
     service = SearchService()
     service.api_key = None
     result = await service.search("test")
-    assert "Error: Brave Search API key is not configured" in result
+    assert "Error: Perplexity API key is not configured" in result
 
 @pytest.mark.asyncio
 async def test_search_error(search_service):
     with patch("httpx.AsyncClient") as MockClient:
         mock_client_instance = AsyncMock()
-        mock_client_instance.get.side_effect = Exception("Network Error")
+        mock_client_instance.post.side_effect = Exception("Network Error")
         
         MockClient.return_value.__aenter__.return_value = mock_client_instance
         MockClient.return_value.__aexit__.return_value = None

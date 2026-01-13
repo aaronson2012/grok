@@ -1,11 +1,11 @@
 # Grok Discord Bot
 
-A Discord bot integrated with OpenRouter (AI) and Brave Search (Real-time web search), featuring multimodal capabilities and persona management.
+A Discord bot integrated with OpenRouter (AI) and Perplexity AI (Real-time web search), featuring multimodal capabilities and persona management.
 
 ## Features
 
 - **AI Chat**: powered by OpenRouter (compatible with OpenAI API).
-- **Web Search**: Real-time web search using Brave Search API, accessible via automatic tool calling.
+- **Web Search**: Real-time web search using Perplexity AI Search API, accessible via automatic tool calling.
 - **Multimodal**: Supports image inputs (including GIFs).
 - **Personas**: Customizable personas per guild.
 - **Context Awareness**: Intelligent message history management and time-based context resetting.
@@ -29,7 +29,7 @@ A Discord bot integrated with OpenRouter (AI) and Brave Search (Real-time web se
     DISCORD_TOKEN=your_discord_bot_token
     OPENROUTER_API_KEY=your_openrouter_key
     OPENROUTER_MODEL=your_preferred_model_id (e.g., anthropic/claude-3-opus)
-    BRAVE_SEARCH_API_KEY=your_brave_search_key
+    PERPLEXITY_API_KEY=your_perplexity_api_key
     ```
 
 4.  **Run the Bot**:
