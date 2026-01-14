@@ -2,26 +2,18 @@ import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
-from ..services.db import db
-from ..services.ai import ai_service
-from ..config import config
+from ..services.persona_service import persona_service
+from ..utils.permissions import is_telegram_admin
 
 logger = logging.getLogger("grok.telegram.settings")
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id in config.TELEGRAM_ADMIN_IDS
-
-
 async def persona_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 
-    async with db.conn.execute(
-        "SELECT id, name, description FROM personas ORDER BY name"
-    ) as cursor:
-        personas = await cursor.fetchall()
+    personas = await persona_service.get_all_personas()
 
     if not personas:
         await update.message.reply_text("No personas found!")
@@ -43,32 +35,21 @@ async def persona_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     query = update.callback_query
     await query.answer()
 
-    if not is_admin(query.from_user.id):
+    if not is_telegram_admin(query.from_user.id):
         await query.edit_message_text("❌ You cannot control this menu.")
         return
 
     persona_id = int(query.data.replace("persona_", ""))
     chat_id = query.message.chat_id
 
-    async with db.conn.execute("SELECT name FROM personas WHERE id = ?", (persona_id,)) as cursor:
-        row = await cursor.fetchone()
-        name = row["name"] if row else "Unknown"
-
-    await db.conn.execute(
-        """
-        INSERT INTO guild_configs (guild_id, active_persona_id)
-        VALUES (?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET active_persona_id = excluded.active_persona_id
-        """,
-        (chat_id, persona_id)
-    )
-    await db.conn.commit()
+    name = await persona_service.get_persona_name(persona_id)
+    await persona_service.set_guild_persona(chat_id, persona_id)
 
     await query.edit_message_text(f"✅ Switched persona to *{name}*!", parse_mode="Markdown")
 
 
 async def persona_create_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 
@@ -80,75 +61,30 @@ async def persona_create_command(update: Update, context: ContextTypes.DEFAULT_T
 
     await update.message.reply_text("🔄 Creating persona...")
 
-    try:
-        ai_prompt = (
-            f"User Input: '{user_input}'\n\n"
-            "Task: Create a Discord bot persona based on this input.\n"
-            "Output strictly in this format:\n"
-            "NAME: <The direct character name or simple title. Max 15 chars. No spaces.>\n"
-            "DESCRIPTION: <A short 1-sentence summary of who this is>\n"
-            "PROMPT: <A 2-3 sentence system instruction. Start with 'You are...'>"
-        )
+    success, result = await persona_service.create_persona(
+        user_input=user_input,
+        created_by=update.effective_user.id,
+        collision_suffix=str(update.effective_user.id % 10000)
+    )
 
-        ai_msg = await ai_service.generate_response(
-            system_prompt="You are a configuration generator.",
-            user_message=ai_prompt
-        )
-
-        content = ai_msg.content.strip()
-        name = "Unknown"
-        description = "Custom Persona"
-        prompt = "You are a helpful assistant."
-
-        for line in content.split("\n"):
-            if line.startswith("NAME:"):
-                name = line.replace("NAME:", "").strip()[:50]
-            elif line.startswith("DESCRIPTION:"):
-                description = line.replace("DESCRIPTION:", "").strip()[:200]
-            elif line.startswith("PROMPT:"):
-                prompt = line.replace("PROMPT:", "").strip()
-
-        if name == "Unknown":
-            name = user_input.split()[0][:15]
-            description = user_input[:50]
-
-        async with db.conn.execute(
-            "SELECT 1 FROM personas WHERE name = ? COLLATE NOCASE", (name,)
-        ) as cursor:
-            if await cursor.fetchone():
-                name = f"{name}_{update.effective_user.id % 10000}"
-
-        await db.conn.execute(
-            """
-            INSERT INTO personas (name, description, system_prompt, is_global, created_by)
-            VALUES (?, ?, ?, 0, ?)
-            """,
-            (name, description, prompt, update.effective_user.id)
-        )
-        await db.conn.commit()
-
+    if success:
         await update.message.reply_text(
             f"✨ *Persona Created*\n\n"
-            f"*Name:* {name}\n"
-            f"*Description:* {description}\n"
-            f"*System Prompt:* {prompt}",
+            f"*Name:* {result['name']}\n"
+            f"*Description:* {result['description']}\n"
+            f"*System Prompt:* {result['system_prompt']}",
             parse_mode="Markdown"
         )
-
-    except Exception as e:
-        logger.error(f"Persona creation failed: {e}")
-        await update.message.reply_text("❌ Creation failed. Please try again.")
+    else:
+        await update.message.reply_text(f"❌ {result}")
 
 
 async def persona_delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 
-    async with db.conn.execute(
-        "SELECT id, name, description FROM personas WHERE name != 'Standard' ORDER BY name"
-    ) as cursor:
-        personas = await cursor.fetchall()
+    personas = await persona_service.get_deletable_personas()
 
     if not personas:
         await update.message.reply_text("No custom personas found to delete.")
@@ -173,18 +109,12 @@ async def persona_delete_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     await query.answer()
 
-    if not is_admin(query.from_user.id):
+    if not is_telegram_admin(query.from_user.id):
         await query.edit_message_text("❌ You cannot control this menu.")
         return
 
     persona_id = int(query.data.replace("delete_persona_", ""))
-
-    async with db.conn.execute("SELECT name FROM personas WHERE id = ?", (persona_id,)) as cursor:
-        row = await cursor.fetchone()
-        name = row["name"] if row else "Unknown"
-
-    await db.conn.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
-    await db.conn.commit()
+    name = await persona_service.delete_persona(persona_id)
 
     await query.edit_message_text(f"🗑️ Deleted persona *{name}*.", parse_mode="Markdown")
 
@@ -192,14 +122,7 @@ async def persona_delete_callback(update: Update, context: ContextTypes.DEFAULT_
 async def persona_current_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
 
-    query = """
-    SELECT p.name, p.description
-    FROM guild_configs g
-    JOIN personas p ON g.active_persona_id = p.id
-    WHERE g.guild_id = ?
-    """
-    async with db.conn.execute(query, (chat_id,)) as cursor:
-        row = await cursor.fetchone()
+    row = await persona_service.get_current_persona(chat_id)
 
     if row:
         await update.message.reply_text(

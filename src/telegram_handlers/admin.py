@@ -3,17 +3,13 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from ..services.db import db
-from ..config import config
+from ..utils.permissions import is_telegram_admin
 
 logger = logging.getLogger("grok.telegram.admin")
 
 
-def is_admin(user_id: int) -> bool:
-    return user_id in config.TELEGRAM_ADMIN_IDS
-
-
 async def memory_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 
@@ -40,7 +36,7 @@ async def memory_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 async def memory_clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 
@@ -53,7 +49,7 @@ async def memory_clear_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def logs_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 
@@ -87,7 +83,7 @@ async def logs_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def logs_clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_admin(update.effective_user.id):
+    if not is_telegram_admin(update.effective_user.id):
         await update.message.reply_text("❌ This command requires admin permissions.")
         return
 

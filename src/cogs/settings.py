@@ -3,17 +3,17 @@ from discord.ext import commands
 from typing import override
 import logging
 from ..services.db import db
-from ..services.ai import ai_service
+from ..services.persona_service import persona_service
 from ..services.emoji_manager import emoji_manager
 
 logger = logging.getLogger("grok.settings")
 
+
 class PersonaSelect(discord.ui.Select):
-    def __init__(self, personas, author_id):
+    def __init__(self, personas: list, author_id: int):
         self.author_id = author_id
         options = []
         for p in personas:
-            # Truncate description to approx 7 words / 50 chars
             desc = p['description']
             if len(desc) > 50:
                 desc = desc[:47] + "..."
@@ -33,23 +33,17 @@ class PersonaSelect(discord.ui.Select):
         persona_id = int(self.values[0])
         name = next(opt.label for opt in self.options if opt.value == self.values[0])
         
-        await db.conn.execute("""
-            INSERT INTO guild_configs (guild_id, active_persona_id) 
-            VALUES (?, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET active_persona_id = excluded.active_persona_id
-        """, (interaction.guild.id, persona_id))
-        await db.conn.commit()
+        await persona_service.set_guild_persona(interaction.guild.id, persona_id)
         
-        # Disable the dropdown
         self.disabled = True
-        # Edit original message to show disabled view
         await interaction.response.edit_message(content=f"✅ Switched persona to **{name}**!", view=self.view)
 
+
 class PersonaView(discord.ui.View):
-    def __init__(self, personas, author_id):
-        super().__init__(timeout=60) # 60 second timeout
+    def __init__(self, personas: list, author_id: int):
+        super().__init__(timeout=60)
         self.add_item(PersonaSelect(personas, author_id))
-        self.message = None # To be set after sending
+        self.message = None
 
     async def on_timeout(self):
         for child in self.children:
@@ -61,8 +55,9 @@ class PersonaView(discord.ui.View):
             except discord.NotFound:
                 pass
 
+
 class PersonaDeleteSelect(discord.ui.Select):
-    def __init__(self, personas, author_id):
+    def __init__(self, personas: list, author_id: int):
         self.author_id = author_id
         options = []
         for p in personas:
@@ -79,16 +74,14 @@ class PersonaDeleteSelect(discord.ui.Select):
             return
 
         persona_id = int(self.values[0])
-        name = next(opt.label for opt in self.options if opt.value == self.values[0])
-        
-        await db.conn.execute("DELETE FROM personas WHERE id = ?", (persona_id,))
-        await db.conn.commit()
+        name = await persona_service.delete_persona(persona_id)
         
         self.disabled = True
         await interaction.response.edit_message(content=f"🗑️ Deleted persona **{name}**.", view=self.view)
 
+
 class PersonaDeleteView(discord.ui.View):
-    def __init__(self, personas, author_id):
+    def __init__(self, personas: list, author_id: int):
         super().__init__(timeout=60)
         self.add_item(PersonaDeleteSelect(personas, author_id))
         self.message = None
@@ -102,6 +95,7 @@ class PersonaDeleteView(discord.ui.View):
                 await self.message.edit(content="❌ Menu timed out.", view=self)
             except discord.NotFound:
                 pass
+
 
 class PersonaModal(discord.ui.Modal):
     def __init__(self):
@@ -118,62 +112,21 @@ class PersonaModal(discord.ui.Modal):
         await interaction.response.defer()
         user_input = self.children[0].value
         
-        try:
-            # Generate Name, Description, and Prompt
-            ai_prompt = (
-                f"User Input: '{user_input}'\n\n"
-                "Task: Create a Discord bot persona based on this input.\n"
-                "Output strictly in this format:\n"
-                "NAME: <The direct character name or simple title. Max 15 chars. No spaces. e.g. 'Batman' not 'DarkKnight', 'Mario' not 'Plumber'>\n"
-                "DESCRIPTION: <A short 1-sentence summary of who this is>\n"
-                "PROMPT: <A 2-3 sentence system instruction. Start with 'You are...'>"
-            )
-            
-            ai_msg = await ai_service.generate_response(
-                system_prompt="You are a configuration generator.",
-                user_message=ai_prompt
-            )
-            
-            # Parse output
-            content = ai_msg.content.strip()
-            name = "Unknown"
-            description = "Custom Persona"
-            prompt = "You are a helpful assistant."
-            
-            for line in content.split('\n'):
-                if line.startswith("NAME:"):
-                    name = line.replace("NAME:", "").strip()[:50]
-                elif line.startswith("DESCRIPTION:"):
-                    description = line.replace("DESCRIPTION:", "").strip()[:200]
-                elif line.startswith("PROMPT:"):
-                    prompt = line.replace("PROMPT:", "").strip()
-            
-            # Fallback if parsing fails
-            if name == "Unknown":
-                name = user_input.split()[0][:15]
-                description = user_input[:50]
-            
-            # Check uniqueness
-            async with db.conn.execute("SELECT 1 FROM personas WHERE name = ? COLLATE NOCASE", (name,)) as cursor:
-                if await cursor.fetchone():
-                    name = f"{name}_{interaction.user.discriminator}" # collision fallback
-
-            await db.conn.execute("""
-                INSERT INTO personas (name, description, system_prompt, is_global, created_by)
-                VALUES (?, ?, ?, 0, ?)
-            """, (name, description, prompt, interaction.user.id))
-            await db.conn.commit()
-            
+        success, result = await persona_service.create_persona(
+            user_input=user_input,
+            created_by=interaction.user.id,
+            collision_suffix=interaction.user.discriminator
+        )
+        
+        if success:
             embed = discord.Embed(title="✨ Persona Created", color=discord.Color.green())
-            embed.add_field(name="Name", value=name, inline=True)
-            embed.add_field(name="Description", value=description, inline=True)
-            embed.add_field(name="System Prompt", value=prompt, inline=False)
-            
+            embed.add_field(name="Name", value=result["name"], inline=True)
+            embed.add_field(name="Description", value=result["description"], inline=True)
+            embed.add_field(name="System Prompt", value=result["system_prompt"], inline=False)
             await interaction.followup.send(embed=embed)
-            
-        except Exception as e:
-            logger.error(f"Persona creation failed: {e}")
-            await interaction.followup.send("❌ Creation failed. Please try again.")
+        else:
+            await interaction.followup.send(f"❌ {result}")
+
 
 class Settings(commands.Cog):
 
@@ -190,15 +143,7 @@ class Settings(commands.Cog):
     @persona.command(name="switch", description="Switch the server's active persona")
     @discord.default_permissions(administrator=True)
     async def switch_persona(self, ctx: discord.ApplicationContext):
-        # Fetch Standard first
-        async with db.conn.execute("SELECT id, name, description FROM personas WHERE name = 'Standard'") as cursor:
-            standard = await cursor.fetchall()
-            
-        # Fetch others alphabetical
-        async with db.conn.execute("SELECT id, name, description FROM personas WHERE name != 'Standard' ORDER BY name") as cursor:
-            others = await cursor.fetchall()
-            
-        personas = standard + others
+        personas = await persona_service.get_all_personas()
             
         if not personas:
             await ctx.respond("No personas found!", ephemeral=False)
@@ -206,15 +151,6 @@ class Settings(commands.Cog):
 
         view = PersonaView(personas, ctx.author.id)
         interaction = await ctx.respond("🎭 **Choose a Persona**:", view=view)
-        # Store message for timeout handling
-        # interaction is an Interaction or WebhookMessage depending on context, 
-        # usually respond() returns an InteractionResponse or Interaction
-        # Actually Pycord ctx.respond returns the Interaction or a Message object if we await it properly?
-        # In Pycord: await ctx.respond() returns a Interaction or Message.
-        
-        # We need the message object to edit it later on timeout.
-        # ctx.respond() returns an Interaction if ephemeral=False? No, it returns a InteractionWebhook or similar.
-        # We can fetch it.
         msg = await interaction.original_response()
         view.message = msg
 
@@ -228,9 +164,7 @@ class Settings(commands.Cog):
     @persona.command(name="delete", description="Delete a custom persona")
     @discord.default_permissions(administrator=True)
     async def delete_persona(self, ctx: discord.ApplicationContext):
-        # Fetch deletable personas
-        async with db.conn.execute("SELECT id, name, description FROM personas WHERE name != 'Standard' ORDER BY name") as cursor:
-            personas = await cursor.fetchall()
+        personas = await persona_service.get_deletable_personas()
             
         if not personas:
             await ctx.respond("No custom personas found to delete.", ephemeral=False)
@@ -242,16 +176,8 @@ class Settings(commands.Cog):
         view.message = msg
 
     @persona.command(name="current", description="Show the current active persona")
-
     async def current_persona(self, ctx: discord.ApplicationContext):
-        query = """
-        SELECT p.name, p.description 
-        FROM guild_configs g
-        JOIN personas p ON g.active_persona_id = p.id
-        WHERE g.guild_id = ?
-        """
-        async with db.conn.execute(query, (ctx.guild.id,)) as cursor:
-            row = await cursor.fetchone()
+        row = await persona_service.get_current_persona(ctx.guild.id)
         
         if row:
             await ctx.respond(f"🎭 Current Persona: **{row['name']}**\n*{row['description']}*")
@@ -269,6 +195,7 @@ class Settings(commands.Cog):
         except Exception as e:
             logger.error(f"Emoji analysis failed: {e}")
             await ctx.followup.send("❌ Analysis failed. Please try again.")
+
 
 def setup(bot: commands.Bot) -> None:
     bot.add_cog(Settings(bot))

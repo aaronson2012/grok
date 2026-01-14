@@ -124,7 +124,8 @@ class Database:
                 await self.conn.commit()
                 logger.info("Applied migration: Added max_topics to digest_configs")
             except Exception:
-                pass
+                # Column may already exist - this is expected
+                logger.debug("Migration skipped: max_topics column may already exist")
             
             # Migration: make channel_id nullable by recreating table
             try:

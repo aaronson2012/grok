@@ -1,4 +1,5 @@
 from openai import AsyncOpenAI, APIError, APITimeoutError, RateLimitError
+from typing import Any
 from ..config import config
 from .tools import tool_registry
 from ..utils.decorators import async_retry
@@ -7,6 +8,7 @@ import logging
 from types import SimpleNamespace
 
 logger = logging.getLogger("grok.ai")
+
 
 class AIService:
     """
@@ -23,7 +25,13 @@ class AIService:
         # Define available tools
         self.tools = tool_registry.get_definitions()
 
-    async def generate_response(self, system_prompt: str, user_message: str | list, history: list[dict] | None = None, tools: list | bool | None = None) -> any:
+    async def generate_response(
+        self,
+        system_prompt: str,
+        user_message: str | list,
+        history: list[dict] | None = None,
+        tools: list | bool | None = None
+    ) -> Any:
         """
         Public wrapper for response generation that handles errors and returns a fallback.
         """
@@ -55,8 +63,8 @@ class AIService:
             messages=messages,
             tools=self.tools if tools is not False else None,
             extra_headers={
-                "HTTP-Referer": "https://github.com/your-repo/grok",
-                "X-Title": "Grok Discord Bot",
+                "HTTP-Referer": "https://github.com/aaronson2012/grok",
+                "X-Title": "Grok Multi-Platform Bot",
             }
         )
         

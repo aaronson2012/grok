@@ -2,17 +2,16 @@ import discord
 from discord.ext import commands, tasks
 from discord.commands import SlashCommandGroup
 import logging
-from datetime import datetime, timedelta
-import zoneinfo
+from datetime import datetime
 from zoneinfo import ZoneInfo
-from typing import List, Optional
 
 from ..services.db import db
-from ..services.ai import ai_service
-from ..services.search import search_service
+from ..services.digest_service import digest_service
 from ..utils.chunker import chunk_text
+from ..utils.constants import MAX_TOPICS_LIMIT
 
 logger = logging.getLogger("grok.digest")
+
 
 class Digest(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -36,8 +35,8 @@ class Digest(commands.Cog):
     @config.command(name="max_topics", description="Set the maximum number of digest topics per user (Admin only)")
     @discord.default_permissions(administrator=True)
     async def set_max_topics(self, ctx: discord.ApplicationContext, limit: int):
-        if limit < 1 or limit > 50:
-            await ctx.respond("❌ Limit must be between 1 and 50.", ephemeral=True)
+        if limit < 1 or limit > MAX_TOPICS_LIMIT:
+            await ctx.respond(f"❌ Limit must be between 1 and {MAX_TOPICS_LIMIT}.", ephemeral=True)
             return
 
         await db.conn.execute("""
@@ -61,100 +60,42 @@ class Digest(commands.Cog):
 
     @config.command(name="time", description="Set your daily digest time (24h format, e.g., 09:00)")
     async def set_time(self, ctx: discord.ApplicationContext, time_str: str):
-        try:
-            datetime.strptime(time_str, "%H:%M")
-        except ValueError:
-            await ctx.respond("❌ Invalid format. Please use HH:MM (e.g., 09:00 or 14:30).", ephemeral=True)
-            return
-
-        await self._ensure_user_settings(ctx.user.id, ctx.guild.id)
-        
-        await db.conn.execute("""
-            UPDATE user_digest_settings 
-            SET daily_time = ? 
-            WHERE user_id = ? AND guild_id = ?
-        """, (time_str, ctx.user.id, ctx.guild.id))
-        await db.conn.commit()
-        
-        await ctx.respond(f"✅ Daily digest time set to **{time_str}**.")
+        success, message = await digest_service.set_daily_time(ctx.user.id, ctx.guild.id, time_str)
+        await ctx.respond(f"{'✅' if success else '❌'} {message}", ephemeral=not success)
 
     @config.command(name="timezone", description="Set your timezone (e.g., UTC, America/New_York)")
     async def set_timezone(self, ctx: discord.ApplicationContext, timezone: str):
-        try:
-            ZoneInfo(timezone)
-        except Exception:
-            await ctx.respond("❌ Invalid timezone. Try 'UTC', 'America/New_York', 'Europe/London', etc.", ephemeral=True)
-            return
-
-        await self._ensure_user_settings(ctx.user.id, ctx.guild.id)
-
-        await db.conn.execute("""
-            UPDATE user_digest_settings 
-            SET timezone = ? 
-            WHERE user_id = ? AND guild_id = ?
-        """, (timezone, ctx.user.id, ctx.guild.id))
-        await db.conn.commit()
-
-        await ctx.respond(f"✅ Timezone set to **{timezone}**.")
+        success, message = await digest_service.set_timezone(ctx.user.id, ctx.guild.id, timezone)
+        await ctx.respond(f"{'✅' if success else '❌'} {message}", ephemeral=not success)
 
     # --- Topic Commands ---
 
     @topics.command(name="add", description="Add a topic to your digest")
     async def add_topic(self, ctx: discord.ApplicationContext, topic: str):
-        topic = topic[:100].strip()
-        if not topic:
-            await ctx.respond("❌ Topic cannot be empty.", ephemeral=True)
-            return
-            
-        await self._ensure_user_settings(ctx.user.id, ctx.guild.id)
-        
-        limit = 10
-        async with db.conn.execute("SELECT max_topics FROM digest_configs WHERE guild_id = ?", (ctx.guild.id,)) as cursor:
-            row = await cursor.fetchone()
-            if row and row['max_topics']:
-                limit = row['max_topics']
-
-        # Check current count to prevent spam
-        async with db.conn.execute("SELECT COUNT(*) FROM digest_topics WHERE user_id = ? AND guild_id = ?", (ctx.user.id, ctx.guild.id)) as cursor:
-            count = (await cursor.fetchone())[0]
-            if count >= limit:
-                await ctx.respond(f"❌ You can only have up to {limit} topics (Server Limit).", ephemeral=True)
-                return
-        
-        # Check for duplicates
-        async with db.conn.execute("SELECT 1 FROM digest_topics WHERE user_id = ? AND guild_id = ? AND topic = ? COLLATE NOCASE", (ctx.user.id, ctx.guild.id, topic)) as cursor:
-            if await cursor.fetchone():
-                await ctx.respond(f"⚠️ You already have **{topic}** in your list.", ephemeral=True)
-                return
-
-        await db.conn.execute("INSERT INTO digest_topics (user_id, guild_id, topic) VALUES (?, ?, ?)", (ctx.user.id, ctx.guild.id, topic))
-        await db.conn.commit()
-        await ctx.respond(f"✅ Added topic: **{topic}**")
+        success, message = await digest_service.add_topic(ctx.user.id, ctx.guild.id, topic)
+        await ctx.respond(f"{'✅' if success else '❌'} {message}", ephemeral=not success)
 
     @topics.command(name="remove", description="Remove a topic from your digest")
     async def remove_topic(self, ctx: discord.ApplicationContext, topic: str):
-        await db.conn.execute("DELETE FROM digest_topics WHERE user_id = ? AND guild_id = ? AND topic = ?", (ctx.user.id, ctx.guild.id, topic))
-        await db.conn.commit()
+        await digest_service.remove_topic(ctx.user.id, ctx.guild.id, topic)
         await ctx.respond(f"✅ Removed topic: **{topic}**")
 
     @topics.command(name="list", description="List your digest topics")
     async def list_topics(self, ctx: discord.ApplicationContext):
-        async with db.conn.execute("SELECT topic FROM digest_topics WHERE user_id = ? AND guild_id = ?", (ctx.user.id, ctx.guild.id)) as cursor:
-            rows = await cursor.fetchall()
-            
-        if not rows:
+        topics_list = await digest_service.get_user_topics(ctx.user.id, ctx.guild.id)
+        
+        if not topics_list:
             await ctx.respond("You have no topics set. Use `/digest topics add` to get started.")
             return
 
-        topics_list = "\n".join([f"• {row['topic']}" for row in rows])
-        await ctx.respond(f"**Your Digest Topics:**\n{topics_list}")
+        formatted = "\n".join([f"• {topic}" for topic in topics_list])
+        await ctx.respond(f"**Your Digest Topics:**\n{formatted}")
 
     @digest.command(name="now", description="Trigger your daily digest immediately (for testing)")
     @commands.cooldown(1, 300, commands.BucketType.user)
     async def trigger_now(self, ctx: discord.ApplicationContext):
         await ctx.defer()
         
-        # Concurrency check
         if ctx.user.id in self.processing_users:
             await ctx.followup.send("⏳ Your digest is already being generated! Please wait.")
             return
@@ -171,16 +112,12 @@ class Digest(commands.Cog):
     async def digest_loop(self):
         """Checks every minute for users due for a digest."""
         try:
-            # Iterate over all guilds that have a configured channel
             async with db.conn.execute("SELECT guild_id FROM digest_configs") as cursor:
                 guilds = await cursor.fetchall()
 
             for guild_row in guilds:
                 guild_id = guild_row['guild_id']
                 
-                # Find users in this guild who need a digest
-                # Condition: current_time_in_user_tz >= daily_time AND (last_sent < today_in_user_tz)
-                # This is tricky in SQL, so we iterate users and check in Python
                 query = """
                     SELECT user_id, timezone, daily_time, last_sent_at 
                     FROM user_digest_settings 
@@ -190,7 +127,7 @@ class Digest(commands.Cog):
                     users = await user_cursor.fetchall()
                     
                 for user in users:
-                    if await self._is_due(user):
+                    if await digest_service.is_due(user):
                         await self.send_digest(guild_id, user['user_id'])
                         
         except Exception as e:
@@ -201,48 +138,7 @@ class Digest(commands.Cog):
     async def before_digest_loop(self):
         await self.bot.wait_until_ready()
 
-    # --- Helpers ---
-
-    async def _ensure_user_settings(self, user_id: int, guild_id: int):
-        await db.conn.execute("""
-            INSERT OR IGNORE INTO user_digest_settings (user_id, guild_id) 
-            VALUES (?, ?)
-        """, (user_id, guild_id))
-        await db.conn.commit()
-
-    async def _is_due(self, user_row) -> bool:
-        """Determines if a user is due for their digest."""
-        try:
-            tz = ZoneInfo(user_row['timezone'])
-            now = datetime.now(tz)
-            
-            target_h, target_m = map(int, user_row['daily_time'].split(':'))
-            target_time = now.replace(hour=target_h, minute=target_m, second=0, microsecond=0)
-            
-            if now < target_time:
-                return False
-                
-            # Check last sent
-            if user_row['last_sent_at']:
-                last_sent = user_row['last_sent_at']
-                if isinstance(last_sent, str):
-                    try:
-                        last_sent_dt = datetime.fromisoformat(last_sent)
-                    except ValueError:
-                        last_sent_dt = datetime.strptime(last_sent, "%Y-%m-%d %H:%M:%S")
-                    
-                    last_sent_dt = last_sent_dt.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
-                else:
-                    last_sent_dt = last_sent.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz)
-
-                if last_sent_dt.date() == now.date():
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error checking if due for user {user_row['user_id']}: {e}")
-            return False
+    # --- Digest Sending ---
 
     async def send_digest(self, guild_id: int, user_id: int) -> bool:
         """Generates and sends the digest."""
@@ -270,10 +166,8 @@ class Digest(commands.Cog):
                 return False
 
             # 2. Get Topics
-            async with db.conn.execute("SELECT topic FROM digest_topics WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cursor:
-                # Deduplicate topics (case-insensitive) just in case
-                raw_topics = [row['topic'] for row in await cursor.fetchall()]
-                topics = sorted(list(set(raw_topics)), key=str.lower)
+            topics = await digest_service.get_user_topics(user_id, guild_id)
+            topics = sorted(list(set(topics)), key=str.lower)
             
             if not topics:
                 return False
@@ -281,9 +175,7 @@ class Digest(commands.Cog):
             # 3. Create Thread
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             
-            async with db.conn.execute("SELECT timezone FROM user_digest_settings WHERE user_id = ? AND guild_id = ?", (user_id, guild_id)) as cursor:
-                row = await cursor.fetchone()
-                timezone_str = row['timezone'] if row else 'UTC'
+            timezone_str = await digest_service.get_user_timezone(user_id, guild_id)
             
             try:
                 user_tz = ZoneInfo(timezone_str)
@@ -294,16 +186,7 @@ class Digest(commands.Cog):
             date_str = now_user.strftime("%Y-%m-%d")
             thread_name = f"Daily Digest for {user.display_name} - {date_str}"
             
-            try:
-                current_hour = now_user.hour
-                if 5 <= current_hour < 12:
-                    greeting = "Good morning"
-                elif 12 <= current_hour < 18:
-                    greeting = "Good afternoon"
-                else:
-                    greeting = "Good evening"
-            except Exception:
-                greeting = "Hello"
+            greeting = digest_service.get_greeting(now_user.hour)
 
             try:
                 start_msg = await channel.send(f"📰 **{greeting}, {user.mention}!** Here is your Daily Digest for {date_str}")
@@ -314,80 +197,15 @@ class Digest(commands.Cog):
 
             # 4. Process Topics
             for topic in topics:
-                recent_headlines = await db.get_recent_digest_headlines(user_id, guild_id, topic)
-                
-                search_results = await search_service.search(f"{topic} news today", count=5)
-                
-                if "No results found" in search_results:
-                    await thread.send(f"**{topic}**\nNo recent news found.")
-                    continue
-
-                history_context = ""
-                if recent_headlines:
-                    history_context = (
-                        "\n\nPreviously reported stories (DO NOT repeat these):\n"
-                        + "\n".join(f"- {h}" for h in recent_headlines[:20])
-                    )
-
-                prompt = (
-                    f"Topic: {topic}\n"
-                    f"Search Results:\n{search_results}"
-                    f"{history_context}\n\n"
-                    "Task: Write a short, engaging summary of NEW news for this topic. "
-                    "Skip any stories similar to the previously reported ones. "
-                    "If ALL stories in the search results are repeats or very similar to previously reported ones, "
-                    "simply respond with: NO_NEW_DEVELOPMENTS\n\n"
-                    "Otherwise, include 1-2 key links if available. "
-                    "Format with Markdown. Do NOT include greetings.\n"
-                    "IMPORTANT: Keep markdown links on a SINGLE LINE - never break [text](url) across lines.\n\n"
-                    "Start your response with a clean, title-cased section header for this topic. "
-                    "Format: SECTION_TITLE: Your Polished Title Here\n"
-                    "Example: If topic is 'ai vibe coding', use 'SECTION_TITLE: AI Vibe Coding' or 'SECTION_TITLE: The Rise of Vibe Coding'\n\n"
-                    "At the end, list the headlines you covered in this format:\n"
-                    "HEADLINES_COVERED:\n- headline 1\n- headline 2"
-                )
-                
-                ai_response = await ai_service.generate_response(
-                    system_prompt="You are a news anchor providing a daily digest. Jump straight into the news. Avoid repeating old stories.",
-                    user_message=prompt
-                )
-                
-                content = ai_response.content
-                
-                if "NO_NEW_DEVELOPMENTS" in content:
-                    await thread.send(f"### {topic.title()}\nNo new developments since the last update.")
-                    continue
-                
-                section_title = topic.title()
-                display_content = content
-                
-                if "SECTION_TITLE:" in content:
-                    lines = content.split("\n", 1)
-                    first_line = lines[0]
-                    if "SECTION_TITLE:" in first_line:
-                        section_title = first_line.split("SECTION_TITLE:", 1)[1].strip()
-                        display_content = lines[1] if len(lines) > 1 else ""
-                
-                headlines_to_save = []
-                if "HEADLINES_COVERED:" in display_content:
-                    parts = display_content.split("HEADLINES_COVERED:")
-                    display_content = parts[0].strip()
-                    if len(parts) > 1:
-                        for line in parts[1].strip().split("\n"):
-                            line = line.strip().lstrip("-").strip()
-                            if line:
-                                headlines_to_save.append(line)
-                
-                for headline in headlines_to_save:
-                    await db.save_digest_headline(user_id, guild_id, topic, headline)
+                section_title, content = await digest_service.generate_topic_digest(user_id, guild_id, topic)
                 
                 header = f"### {section_title}\n"
                 first_chunk_limit = 1900 - len(header)
                 
-                if len(display_content) <= first_chunk_limit:
-                    await thread.send(f"{header}{display_content}")
+                if len(content) <= first_chunk_limit:
+                    await thread.send(f"{header}{content}")
                 else:
-                    chunks = chunk_text(display_content, chunk_size=1900)
+                    chunks = chunk_text(content, chunk_size=1900)
                     for i, chunk in enumerate(chunks):
                         if i == 0:
                             await thread.send(f"{header}{chunk}")
@@ -395,12 +213,7 @@ class Digest(commands.Cog):
                             await thread.send(chunk)
 
             # 5. Update last_sent_at
-            await db.conn.execute("""
-                UPDATE user_digest_settings 
-                SET last_sent_at = CURRENT_TIMESTAMP 
-                WHERE user_id = ? AND guild_id = ?
-            """, (user_id, guild_id))
-            await db.conn.commit()
+            await digest_service.mark_digest_sent(user_id, guild_id)
             
             return True
 
@@ -410,6 +223,7 @@ class Digest(commands.Cog):
             return False
         finally:
             self.processing_users.discard(user_id)
+
 
 def setup(bot: commands.Bot):
     bot.add_cog(Digest(bot))

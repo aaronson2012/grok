@@ -1,17 +1,15 @@
 import logging
-import json
-import base64
-import io
 from datetime import datetime
 from telegram import Update
 from telegram.ext import ContextTypes
-from PIL import Image
 
 from ..services.ai import ai_service
 from ..services.db import db
-from ..services.tools import tool_registry
+from ..services.chat_service import chat_service
+from ..types import ChatMessage
 from ..utils.chunker import chunk_text
 from ..utils.telegram_format import markdown_to_telegram_html
+from ..utils.constants import Platform, SUMMARIZATION_THRESHOLD_TELEGRAM, TELEGRAM_CHUNK_SIZE
 
 logger = logging.getLogger("grok.telegram.chat")
 
@@ -23,7 +21,7 @@ Talk to me by replying to my messages or mentioning me\!
 *Commands:*
 /start \- Start the bot
 /help \- Show this help message
-/chat <prompt> \- Chat with AI directly
+/chat \<prompt\> \- Chat with AI directly
 
 *Admin Commands:*
 /memory\_view \- View channel memory
@@ -33,16 +31,16 @@ Talk to me by replying to my messages or mentioning me\!
 
 *Persona Commands:*
 /persona \- Switch persona
-/persona\_create <description> \- Create new persona
+/persona\_create \<description\> \- Create new persona
 /persona\_delete \- Delete a persona
 /persona\_current \- Show current persona
 
 *Digest Commands:*
-/digest\_add <topic> \- Add a news topic
-/digest\_remove <topic> \- Remove a topic
+/digest\_add \<topic\> \- Add a news topic
+/digest\_remove \<topic\> \- Remove a topic
 /digest\_list \- List your topics
-/digest\_time <HH:MM> \- Set delivery time
-/digest\_timezone <tz> \- Set timezone
+/digest\_time \<HH:MM\> \- Set delivery time
+/digest\_timezone \<tz\> \- Set timezone
 /digest\_now \- Trigger digest now
 """
 
@@ -78,11 +76,21 @@ async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
     if ai_msg.tool_calls:
-        response_text = await _handle_tool_calls(ai_msg, system_prompt, user_message, update)
+        async def send_status(text: str) -> None:
+            await update.message.reply_text(text.replace("*", "_"), parse_mode="Markdown")
+        
+        response_text = await chat_service.handle_tool_calls(
+            ai_msg=ai_msg,
+            system_prompt=system_prompt,
+            user_message=user_message,
+            history=[],
+            send_status=send_status,
+            context={"chat_id": chat_id}
+        )
     else:
         response_text = ai_msg.content
 
-    for chunk in chunk_text(response_text, chunk_size=4000):
+    for chunk in chunk_text(response_text, chunk_size=TELEGRAM_CHUNK_SIZE):
         html_chunk = markdown_to_telegram_html(chunk)
         await update.message.reply_text(html_chunk, parse_mode="HTML")
 
@@ -109,16 +117,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     base_persona = await db.get_guild_persona(chat_id)
 
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    memory_block = f"\n[PREVIOUS CONVERSATION SUMMARY]:\n{current_summary}\n" if current_summary else ""
-
-    system_prompt = (
-        f"Current Date: {current_date}\n{base_persona}\n{memory_block}\n"
-        "INSTRUCTION: Focus primarily on the user's latest message. "
-        "Use the chat history ONLY for context if relevant. "
-        "If the latest request is unrelated to previous messages, treat it as a new topic. "
-        "Users are identified by [User ID] at the start of their messages. "
-        "IMPORTANT: Keep your response concise and under 3900 characters to fit in a Telegram message."
+    system_prompt = await chat_service.build_system_prompt(
+        base_persona=base_persona,
+        platform=Platform.TELEGRAM,
+        current_summary=current_summary
     )
 
     user_content = await _build_user_message_content(message, text, user_id)
@@ -130,151 +132,82 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
     if ai_msg.tool_calls:
-        response_text = await _handle_tool_calls(ai_msg, system_prompt, f"[{user_id}]: {text}", update, history)
+        async def send_status(text: str) -> None:
+            await update.message.reply_text(text.replace("*", "_"), parse_mode="Markdown")
+        
+        response_text = await chat_service.handle_tool_calls(
+            ai_msg=ai_msg,
+            system_prompt=system_prompt,
+            user_message=f"[{user_id}]: {text}",
+            history=history,
+            send_status=send_status,
+            context={"chat_id": chat_id}
+        )
     else:
         response_text = ai_msg.content
 
-    for chunk in chunk_text(response_text, chunk_size=4000):
+    for chunk in chunk_text(response_text, chunk_size=TELEGRAM_CHUNK_SIZE):
         html_chunk = markdown_to_telegram_html(chunk)
         await message.reply_text(html_chunk, parse_mode="HTML")
 
-    # Include current exchange for summarization (both user message and bot response)
+    # Include current exchange for summarization
     current_exchange = [
         {"role": "user", "content": f"[{user_id}]: {text}", "id": message.message_id},
         {"role": "assistant", "content": response_text, "id": message.message_id},
     ]
     messages_to_check = history + current_exchange
 
-    # Determine unsummarized messages (allow creation even without prior summary)
     last_summarized_id = summary_data["last_msg_id"] if summary_data else 0
     unsummarized_msgs = [m for m in messages_to_check if m.get("id", 0) > last_summarized_id]
 
-    # Summarize after each exchange (threshold=2: 1 user msg + 1 bot response)
-    if len(unsummarized_msgs) >= 2:
-        await _update_summary(chat_id, current_summary, unsummarized_msgs)
+    if len(unsummarized_msgs) >= SUMMARIZATION_THRESHOLD_TELEGRAM:
+        await chat_service.update_summary(chat_id, current_summary, unsummarized_msgs)
 
 
 async def _build_message_history(message, context) -> list[dict]:
-    history = []
-    last_msg_time = None
-
+    """Build message history from reply chain using chat_service."""
     if not message.reply_to_message:
-        return history
+        return []
 
-    reply_chain = []
+    messages = []
     current = message.reply_to_message
+    last_msg_time = None
 
     for _ in range(300):
         if not current:
             break
 
-        if last_msg_time:
-            time_diff = (last_msg_time - current.date).total_seconds()
-            if time_diff > 86400:
-                break
-
-        last_msg_time = current.date
-
-        if current.from_user.id == context.bot.id:
-            role = "assistant"
-            content = current.text or ""
-        else:
-            role = "user"
-            content = f"[{current.from_user.id}]: {current.text or ''}"
-
-        if content:
-            reply_chain.append({"role": role, "content": content, "id": current.message_id})
+        messages.append(ChatMessage(
+            id=current.message_id,
+            role="assistant" if current.from_user.id == context.bot.id else "user",
+            content=current.text or "",
+            author_id=current.from_user.id,
+            timestamp=current.date
+        ))
 
         current = current.reply_to_message
 
-    history = list(reversed(reply_chain))
-    return history
+    return await chat_service.build_message_history(
+        messages=messages,
+        bot_id=context.bot.id
+    )
 
 
 async def _build_user_message_content(message, text: str, user_id: int) -> list[dict]:
-    user_content = [{"type": "text", "text": f"[{user_id}]: {text}"}]
-
+    """Build multimodal user content using chat_service."""
+    images = []
+    
     if message.photo:
         try:
             photo = message.photo[-1]
             file = await photo.get_file()
             image_bytes = await file.download_as_bytearray()
-
-            with Image.open(io.BytesIO(image_bytes)) as img:
-                output_buffer = io.BytesIO()
-                img.convert("RGB").save(output_buffer, format="JPEG")
-                output_buffer.seek(0)
-
-                base64_image = base64.b64encode(output_buffer.getvalue()).decode("utf-8")
-                data_url = f"data:image/jpeg;base64,{base64_image}"
-
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": data_url}
-                })
+            images.append((bytes(image_bytes), "image/jpeg"))
         except Exception as e:
             logger.error(f"Failed to process image: {e}")
 
-    return user_content
-
-
-async def _handle_tool_calls(ai_msg, system_prompt: str, user_message: str, update: Update, history: list = None) -> str:
-    tool_call = ai_msg.tool_calls[0]
-    func_name = tool_call.function.name
-    args = json.loads(tool_call.function.arguments)
-
-    if func_name == "web_search":
-        query = args.get("query", "something")
-        await update.message.reply_text(f"🔎 Searching for: _{query}_...", parse_mode="Markdown")
-    elif func_name == "calculator":
-        expr = args.get("expression", "math")
-        await update.message.reply_text(f"🧮 Calculating: _{expr}_...", parse_mode="Markdown")
-    else:
-        await update.message.reply_text(f"🤖 Using tool: _{func_name}_...", parse_mode="Markdown")
-
-    try:
-        tool_result = await tool_registry.execute(func_name, args)
-    except Exception as e:
-        tool_result = "Tool execution failed. Please try again."
-        await db.log_error(e, {
-            "context": "Tool Execution",
-            "tool": func_name,
-            "args": args,
-            "chat_id": update.effective_chat.id
-        })
-
-    if history is None:
-        history = []
-
-    context_injection = f"Tool Output for '{func_name}':\n{tool_result}"
-    history.append({"role": "system", "content": context_injection})
-
-    final_msg = await ai_service.generate_response(
-        system_prompt=system_prompt,
-        user_message=user_message,
-        history=history,
-        tools=False
+    return await chat_service.build_user_content(
+        text=text,
+        user_id=user_id,
+        images=images if images else None
     )
-
-    return final_msg.content
-
-
-async def _update_summary(chat_id: int, current_summary: str, messages: list):
-    try:
-        if not messages:
-            return
-
-        to_summarize = []
-        for msg in messages:
-            role = msg["role"]
-            content = msg["content"]
-            to_summarize.append(f"{role}: {content}")
-
-        new_summary = await ai_service.summarize_conversation(current_summary, to_summarize)
-        last_msg_id = messages[-1]["id"]
-
-        await db.update_channel_summary(chat_id, new_summary, last_msg_id)
-        logger.info(f"Updated summary for chat {chat_id} (up to msg {last_msg_id})")
-
-    except Exception as e:
-        logger.error(f"Failed to update summary: {e}")
