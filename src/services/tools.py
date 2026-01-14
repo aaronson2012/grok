@@ -1,6 +1,7 @@
 import logging
 from typing import Callable, Any, Awaitable
 from .search import search_service
+from .db import db
 from ..utils.calculator import calculate
 
 logger = logging.getLogger("grok.tools")
@@ -50,6 +51,7 @@ class ToolRegistry:
             return str(result)
         except Exception as e:
             logger.error(f"Error executing tool {name}: {e}")
+            await db.log_error(e, {"context": "tool_execution", "tool": name, "args": arguments})
             return f"Tool execution failed. Please try again."
 
 # Initialize registry

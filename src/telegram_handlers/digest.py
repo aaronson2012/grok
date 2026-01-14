@@ -102,8 +102,7 @@ async def trigger_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def send_digest(chat_id: int, user_id: int, bot: Bot) -> bool:
     """Generates and sends the digest for Telegram."""
     try:
-        topics = await digest_service.get_user_topics(user_id, chat_id)
-        topics = sorted(list(set(topics)), key=str.lower)
+        topics = await digest_service.get_prepared_topics(user_id, chat_id)
 
         if not topics:
             return False

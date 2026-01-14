@@ -152,8 +152,7 @@ class Digest(commands.Cog):
                 if not isinstance(channel, discord.TextChannel):
                     return False
 
-                topics = await digest_service.get_user_topics(user_id, guild_id)
-                topics = sorted(list(set(topics)), key=str.lower)
+                topics = await digest_service.get_prepared_topics(user_id, guild_id)
                 
                 if not topics:
                     return False

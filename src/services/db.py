@@ -5,7 +5,7 @@ import json
 import sqlite3
 from datetime import datetime
 from ..config import config
-from ..utils.constants import MAX_HEADLINE_HISTORY
+from ..utils.constants import MAX_HEADLINE_HISTORY, MAX_EMOJIS_IN_CONTEXT
 
 logger = logging.getLogger("grok.db")
 
@@ -186,7 +186,7 @@ class Database:
         await self.conn.execute(query, (emoji_id, guild_id, name, description, animated))
         await self.conn.commit()
 
-    async def get_guild_emojis_context(self, guild_id: int, limit: int = 50) -> str:
+    async def get_guild_emojis_context(self, guild_id: int, limit: int = MAX_EMOJIS_IN_CONTEXT) -> str:
         """Returns a formatted string of emoji descriptions for the system prompt."""
         query = "SELECT emoji_id, name, description, animated FROM emojis WHERE guild_id = ? ORDER BY RANDOM() LIMIT ?"
         async with self.conn.execute(query, (guild_id, limit)) as cursor:

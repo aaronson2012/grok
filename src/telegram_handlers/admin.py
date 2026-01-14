@@ -4,6 +4,7 @@ from telegram.ext import ContextTypes
 
 from ..services.admin_service import admin_service
 from ..utils.permissions import require_telegram_admin
+from ..utils.constants import TELEGRAM_ADMIN_CONTENT_LIMIT
 
 logger = logging.getLogger("grok.telegram.admin")
 
@@ -19,8 +20,8 @@ async def memory_view_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     content = summary["content"]
-    if len(content) > 3500:
-        content = content[:3497] + "..."
+    if len(content) > TELEGRAM_ADMIN_CONTENT_LIMIT:
+        content = content[:TELEGRAM_ADMIN_CONTENT_LIMIT - 3] + "..."
 
     await update.message.reply_text(
         f"🧠 *Memory for this chat:*\n\n{content}\n\n_Last updated: {summary['updated_at']}_",

@@ -64,7 +64,6 @@ class GrokBot(commands.Bot):
         if isinstance(error, commands.CommandNotFound):
             return # Ignore unknown commands
         logger.error(f"Command error: {error}")
-        # Optionally report other errors to the user
-        # await ctx.send(f"An error occurred: {error}")
+        await db.log_error(error, {"context": "Discord command", "command": ctx.command.name if ctx.command else "unknown", "guild_id": ctx.guild.id if ctx.guild else None})
 
 bot = GrokBot()

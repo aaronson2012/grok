@@ -47,7 +47,7 @@ class AIService:
             return SimpleNamespace(content="I'm having trouble thinking right now. Please try again later.", tool_calls=None)
 
     @async_retry(retries=3, delay=1.0, exceptions=(APIError, APITimeoutError, RateLimitError))
-    async def _generate_response_internal(self, system_prompt: str, user_message: str | list, history: list[dict] | None = None, tools: list | bool | None = None) -> any:
+    async def _generate_response_internal(self, system_prompt: str, user_message: str | list, history: list[dict] | None = None, tools: list | bool | None = None) -> Any:
         """
         Internal method for generating responses with retry logic.
         """

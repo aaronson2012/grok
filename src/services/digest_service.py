@@ -14,7 +14,7 @@ from .ai import ai_service
 from .db import db
 from .search import search_service
 from ..utils.chunker import chunk_text
-from ..utils.constants import DEFAULT_MAX_TOPICS, MAX_TOPIC_LENGTH, DIGEST_SEARCH_COUNT, Platform
+from ..utils.constants import DEFAULT_MAX_TOPICS, MAX_TOPIC_LENGTH, DIGEST_SEARCH_COUNT, MAX_RECENT_HEADLINES_DISPLAY, Platform
 
 logger = logging.getLogger("grok.digest_service")
 
@@ -105,6 +105,11 @@ class DigestService:
         ) as cursor:
             rows = await cursor.fetchall()
         return [row['topic'] for row in rows]
+
+    async def get_prepared_topics(self, user_id: int, guild_id: int) -> list[str]:
+        """Get sorted, deduplicated topics ready for digest generation."""
+        topics = await self.get_user_topics(user_id, guild_id)
+        return sorted(list(set(topics)), key=str.lower)
 
     async def set_daily_time(self, user_id: int, guild_id: int, time_str: str) -> tuple[bool, str]:
         """Set daily digest time."""
@@ -224,7 +229,7 @@ class DigestService:
         if recent_headlines:
             history_context = (
                 "\n\nPreviously reported stories (DO NOT repeat these):\n"
-                + "\n".join(f"- {h}" for h in recent_headlines[:20])
+                + "\n".join(f"- {h}" for h in recent_headlines[:MAX_RECENT_HEADLINES_DISPLAY])
             )
 
         prompt = (

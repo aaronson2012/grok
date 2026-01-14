@@ -10,7 +10,7 @@ from ..services.tools import tool_registry
 from ..services.chat_service import chat_service
 from ..services.emoji_manager import emoji_manager
 from ..utils.chunker import chunk_text
-from ..utils.constants import Platform, SUMMARIZATION_THRESHOLD_DISCORD
+from ..utils.constants import Platform, SUMMARIZATION_THRESHOLD_DISCORD, MAX_HISTORY_MESSAGES
 
 logger = logging.getLogger("grok.chat")
 
@@ -57,7 +57,7 @@ class Chat(commands.Cog):
         
         messages = []
         
-        async for msg in message.channel.history(limit=300, before=message):
+        async for msg in message.channel.history(limit=MAX_HISTORY_MESSAGES, before=message):
             if msg.author.bot and msg.author != self.bot.user:
                 continue
             
