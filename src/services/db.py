@@ -2,8 +2,10 @@ import aiosqlite
 import logging
 import traceback
 import json
+import sqlite3
 from datetime import datetime
 from ..config import config
+from ..utils.constants import MAX_HEADLINE_HISTORY
 
 logger = logging.getLogger("grok.db")
 
@@ -12,18 +14,18 @@ class Database:
         self.db_path = config.DATABASE_PATH
         self.conn = None
 
-    async def connect(self):
+    async def connect(self) -> None:
         self.conn = await aiosqlite.connect(self.db_path)
         self.conn.row_factory = aiosqlite.Row
         await self.init_schema()
         logger.info(f"Connected to database at {self.db_path}")
 
-    async def close(self):
+    async def close(self) -> None:
         if self.conn:
             await self.conn.close()
             logger.info("Database connection closed")
 
-    async def init_schema(self):
+    async def init_schema(self) -> None:
         schema = """
         CREATE TABLE IF NOT EXISTS personas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -123,9 +125,8 @@ class Database:
                 await self.conn.execute("ALTER TABLE digest_configs ADD COLUMN max_topics INTEGER DEFAULT 10")
                 await self.conn.commit()
                 logger.info("Applied migration: Added max_topics to digest_configs")
-            except Exception:
-                # Column may already exist - this is expected
-                logger.debug("Migration skipped: max_topics column may already exist")
+            except sqlite3.OperationalError:
+                logger.debug("Migration skipped: max_topics column already exists")
             
             # Migration: make channel_id nullable by recreating table
             try:
@@ -145,7 +146,7 @@ class Database:
                         """)
                         await self.conn.commit()
                         logger.info("Applied migration: Made channel_id nullable in digest_configs")
-            except Exception as e:
+            except sqlite3.OperationalError as e:
                 logger.warning(f"Migration check for channel_id failed (may be fine): {e}")
             
             # Seed default personas if table is empty
@@ -158,7 +159,7 @@ class Database:
             logger.error(f"Failed to initialize schema: {e}")
             raise
 
-    async def _seed_defaults(self):
+    async def _seed_defaults(self) -> None:
         defaults = [
             ("Standard", "The helpful and witty default personality.", 
              "You are Grok, a witty and helpful AI companion. You are not the xAI Grok. Respond naturally.")
@@ -173,7 +174,7 @@ class Database:
 
     # --- Helper Methods ---
     
-    async def save_emoji_description(self, emoji_id: int, guild_id: int, name: str, description: str, animated: bool):
+    async def save_emoji_description(self, emoji_id: int, guild_id: int, name: str, description: str, animated: bool) -> None:
         query = """
         INSERT INTO emojis (emoji_id, guild_id, name, description, animated, last_analyzed)
         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -185,7 +186,7 @@ class Database:
         await self.conn.execute(query, (emoji_id, guild_id, name, description, animated))
         await self.conn.commit()
 
-    async def get_guild_emojis_context(self, guild_id: int, limit: int = 50):
+    async def get_guild_emojis_context(self, guild_id: int, limit: int = 50) -> str:
         """Returns a formatted string of emoji descriptions for the system prompt."""
         query = "SELECT emoji_id, name, description, animated FROM emojis WHERE guild_id = ? ORDER BY RANDOM() LIMIT ?"
         async with self.conn.execute(query, (guild_id, limit)) as cursor:
@@ -202,7 +203,7 @@ class Database:
             
         return "\n".join(lines)
 
-    async def get_channel_summary(self, channel_id: int):
+    async def get_channel_summary(self, channel_id: int) -> dict[str, str | int] | None:
         """Retrieves the stored summary for a channel."""
         query = "SELECT content, last_msg_id FROM summaries WHERE channel_id = ?"
         async with self.conn.execute(query, (channel_id,)) as cursor:
@@ -211,7 +212,7 @@ class Database:
                 return {"content": row['content'], "last_msg_id": row['last_msg_id']}
         return None
 
-    async def update_channel_summary(self, channel_id: int, content: str, last_msg_id: int):
+    async def update_channel_summary(self, channel_id: int, content: str, last_msg_id: int) -> None:
         """Updates or inserts a channel summary."""
         query = """
         INSERT INTO summaries (channel_id, content, last_msg_id, updated_at)
@@ -224,7 +225,7 @@ class Database:
         await self.conn.execute(query, (channel_id, content, last_msg_id))
         await self.conn.commit()
 
-    async def get_guild_persona(self, guild_id: int):
+    async def get_guild_persona(self, guild_id: int) -> str:
         query = """
         SELECT p.system_prompt 
         FROM guild_configs g
@@ -241,7 +242,7 @@ class Database:
             row = await cursor.fetchone()
             return row['system_prompt'] if row else "You are a helpful assistant."
 
-    async def log_error(self, error: Exception, context: dict = None):
+    async def log_error(self, error: Exception, context: dict | None = None) -> None:
         try:
             error_type = type(error).__name__
             message = str(error)
@@ -265,13 +266,13 @@ class Database:
         WHERE user_id = ? AND guild_id = ? AND topic = ? COLLATE NOCASE
         AND sent_at > datetime('now', ?)
         ORDER BY sent_at DESC
-        LIMIT 50
+        LIMIT ?
         """
-        async with self.conn.execute(query, (user_id, guild_id, topic, f'-{days} days')) as cursor:
+        async with self.conn.execute(query, (user_id, guild_id, topic, f'-{days} days', MAX_HEADLINE_HISTORY)) as cursor:
             rows = await cursor.fetchall()
         return [row['headline'] for row in rows]
 
-    async def save_digest_headline(self, user_id: int, guild_id: int, topic: str, headline: str, url: str = None):
+    async def save_digest_headline(self, user_id: int, guild_id: int, topic: str, headline: str, url: str = None) -> None:
         query = """
         INSERT INTO digest_history (user_id, guild_id, topic, headline, url)
         VALUES (?, ?, ?, ?, ?)
@@ -279,7 +280,7 @@ class Database:
         await self.conn.execute(query, (user_id, guild_id, topic, headline, url))
         await self.conn.commit()
 
-    async def cleanup_old_digest_history(self, days: int = 30):
+    async def cleanup_old_digest_history(self, days: int = 30) -> None:
         query = "DELETE FROM digest_history WHERE sent_at < datetime('now', ?)"
         await self.conn.execute(query, (f'-{days} days',))
         await self.conn.commit()

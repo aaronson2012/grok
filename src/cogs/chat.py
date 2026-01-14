@@ -56,7 +56,6 @@ class Chat(commands.Cog):
         from ..types import ChatMessage
         
         messages = []
-        last_msg_time = None
         
         async for msg in message.channel.history(limit=300, before=message):
             if msg.author.bot and msg.author != self.bot.user:

@@ -9,7 +9,7 @@ logger = logging.getLogger("grok.search")
 class SearchService:
     def __init__(self):
         self.api_key = config.PERPLEXITY_API_KEY
-        self.base_url = "https://api.perplexity.ai/search"
+        self.base_url = config.PERPLEXITY_BASE_URL
 
     @async_retry(retries=2, delay=1.0, exceptions=(httpx.HTTPError, httpx.TimeoutException))
     async def search(self, query: str, count: int = 5) -> str:

@@ -4,14 +4,17 @@ Handles digest generation, topic management, and scheduling logic.
 """
 import logging
 from datetime import datetime
-from zoneinfo import ZoneInfo
-from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from aiosqlite import Row
 
 from .ai import ai_service
 from .db import db
 from .search import search_service
 from ..utils.chunker import chunk_text
-from ..utils.constants import DEFAULT_MAX_TOPICS, Platform
+from ..utils.constants import DEFAULT_MAX_TOPICS, MAX_TOPIC_LENGTH, DIGEST_SEARCH_COUNT, Platform
 
 logger = logging.getLogger("grok.digest_service")
 
@@ -64,7 +67,7 @@ class DigestService:
         Returns:
             (success, message) tuple
         """
-        topic = topic[:100].strip()
+        topic = topic[:MAX_TOPIC_LENGTH].strip()
         if not topic:
             return False, "Topic cannot be empty."
         
@@ -125,7 +128,7 @@ class DigestService:
         """Set user's timezone."""
         try:
             ZoneInfo(timezone)
-        except Exception:
+        except (KeyError, ZoneInfoNotFoundError):
             return False, "Invalid timezone. Try 'UTC', 'America/New_York', 'Europe/London', etc."
         
         await self.ensure_user_settings(user_id, guild_id)
@@ -148,7 +151,14 @@ class DigestService:
             row = await cursor.fetchone()
             return row['timezone'] if row else 'UTC'
 
-    async def is_due(self, user_row: Any) -> bool:
+    def get_user_timezone_safe(self, timezone_str: str) -> ZoneInfo:
+        """Get a ZoneInfo object, falling back to UTC if invalid."""
+        try:
+            return ZoneInfo(timezone_str)
+        except (KeyError, ZoneInfoNotFoundError):
+            return ZoneInfo('UTC')
+
+    async def is_due(self, user_row: "Row") -> bool:
         """Determines if a user is due for their digest."""
         try:
             tz = ZoneInfo(user_row['timezone'])
@@ -205,7 +215,7 @@ class DigestService:
         """
         recent_headlines = await db.get_recent_digest_headlines(user_id, guild_id, topic)
         
-        search_results = await search_service.search(f"{topic} news today", count=5)
+        search_results = await search_service.search(f"{topic} news today", count=DIGEST_SEARCH_COUNT)
         
         if "No results found" in search_results:
             return topic.title(), "No recent news found."
@@ -280,6 +290,48 @@ class DigestService:
             WHERE user_id = ? AND guild_id = ?
         """, (user_id, guild_id))
         await db.conn.commit()
+
+    async def set_max_topics(self, guild_id: int, limit: int) -> None:
+        """Set the max topics limit for a guild (admin only)."""
+        await db.conn.execute("""
+            INSERT INTO digest_configs (guild_id, max_topics) 
+            VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET max_topics = excluded.max_topics
+        """, (guild_id, limit))
+        await db.conn.commit()
+
+    async def set_digest_channel(self, guild_id: int, channel_id: int) -> None:
+        """Set the digest output channel for a guild (admin only)."""
+        await db.conn.execute("""
+            INSERT INTO digest_configs (guild_id, channel_id) 
+            VALUES (?, ?)
+            ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id
+        """, (guild_id, channel_id))
+        await db.conn.commit()
+
+    async def get_digest_channel_id(self, guild_id: int) -> int | None:
+        """Get the digest channel ID for a guild."""
+        async with db.conn.execute(
+            "SELECT channel_id FROM digest_configs WHERE guild_id = ?",
+            (guild_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row['channel_id'] if row else None
+
+    async def get_guilds_with_digest_config(self) -> list[int]:
+        """Get all guild IDs that have digest configuration."""
+        async with db.conn.execute("SELECT guild_id FROM digest_configs") as cursor:
+            rows = await cursor.fetchall()
+        return [row['guild_id'] for row in rows]
+
+    async def get_users_for_digest_check(self, guild_id: int) -> list["Row"]:
+        """Get all users in a guild for digest due check."""
+        async with db.conn.execute("""
+            SELECT user_id, timezone, daily_time, last_sent_at 
+            FROM user_digest_settings 
+            WHERE guild_id = ?
+        """, (guild_id,)) as cursor:
+            return await cursor.fetchall()
 
 
 # Singleton instance

@@ -3,16 +3,13 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from ..services.persona_service import persona_service
-from ..utils.permissions import is_telegram_admin
+from ..utils.permissions import is_telegram_admin, require_telegram_admin
 
 logger = logging.getLogger("grok.telegram.settings")
 
 
+@require_telegram_admin
 async def persona_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_telegram_admin(update.effective_user.id):
-        await update.message.reply_text("❌ This command requires admin permissions.")
-        return
-
     personas = await persona_service.get_all_personas()
 
     if not personas:
@@ -48,11 +45,8 @@ async def persona_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.edit_message_text(f"✅ Switched persona to *{name}*!", parse_mode="Markdown")
 
 
+@require_telegram_admin
 async def persona_create_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_telegram_admin(update.effective_user.id):
-        await update.message.reply_text("❌ This command requires admin permissions.")
-        return
-
     if not context.args:
         await update.message.reply_text("Usage: /persona_create <description>\nExample: /persona_create A sarcastic hacker")
         return
@@ -79,11 +73,8 @@ async def persona_create_command(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"❌ {result}")
 
 
+@require_telegram_admin
 async def persona_delete_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not is_telegram_admin(update.effective_user.id):
-        await update.message.reply_text("❌ This command requires admin permissions.")
-        return
-
     personas = await persona_service.get_deletable_personas()
 
     if not personas:

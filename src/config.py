@@ -9,7 +9,9 @@ class Config:
     TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-3-flash-preview")
+    OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
+    PERPLEXITY_BASE_URL = os.getenv("PERPLEXITY_BASE_URL", "https://api.perplexity.ai/search")
     DATABASE_PATH = os.getenv("DATABASE_PATH", "data/grok.db")
     DEBUG_GUILD_IDS = [int(g) for g in os.getenv("DEBUG_GUILD_IDS", "").split(",") if g.strip()]
     TELEGRAM_ADMIN_IDS = [int(g) for g in os.getenv("TELEGRAM_ADMIN_IDS", "").split(",") if g.strip()]

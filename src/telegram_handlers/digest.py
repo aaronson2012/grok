@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
-from zoneinfo import ZoneInfo
-from telegram import Update
+from telegram import Bot, Update
 from telegram.ext import ContextTypes
 
 from ..services.db import db
@@ -100,7 +99,7 @@ async def trigger_now_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("❌ Could not send digest. Check if you have topics configured.")
 
 
-async def send_digest(chat_id: int, user_id: int, bot) -> bool:
+async def send_digest(chat_id: int, user_id: int, bot: Bot) -> bool:
     """Generates and sends the digest for Telegram."""
     try:
         topics = await digest_service.get_user_topics(user_id, chat_id)
@@ -110,11 +109,7 @@ async def send_digest(chat_id: int, user_id: int, bot) -> bool:
             return False
 
         timezone_str = await digest_service.get_user_timezone(user_id, chat_id)
-
-        try:
-            user_tz = ZoneInfo(timezone_str)
-        except Exception:
-            user_tz = ZoneInfo("UTC")
+        user_tz = digest_service.get_user_timezone_safe(timezone_str)
 
         now_user = datetime.now(user_tz)
         date_str = now_user.strftime("%Y-%m-%d")

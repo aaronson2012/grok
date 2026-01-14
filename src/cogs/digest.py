@@ -1,14 +1,14 @@
 import discord
 from discord.ext import commands, tasks
 from discord.commands import SlashCommandGroup
+import asyncio
 import logging
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 from ..services.db import db
 from ..services.digest_service import digest_service
 from ..utils.chunker import chunk_text
-from ..utils.constants import MAX_TOPICS_LIMIT
+from ..utils.constants import MAX_TOPICS_LIMIT, THREAD_ARCHIVE_DURATION_MINUTES
 
 logger = logging.getLogger("grok.digest")
 
@@ -16,7 +16,7 @@ logger = logging.getLogger("grok.digest")
 class Digest(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.processing_users = set()
+        self._user_locks: dict[int, asyncio.Lock] = {}
         self.digest_loop.start()
 
     def cog_unload(self):
@@ -39,23 +39,13 @@ class Digest(commands.Cog):
             await ctx.respond(f"❌ Limit must be between 1 and {MAX_TOPICS_LIMIT}.", ephemeral=True)
             return
 
-        await db.conn.execute("""
-            INSERT INTO digest_configs (guild_id, max_topics) 
-            VALUES (?, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET max_topics = excluded.max_topics
-        """, (ctx.guild.id, limit))
-        await db.conn.commit()
+        await digest_service.set_max_topics(ctx.guild.id, limit)
         await ctx.respond(f"✅ Max topics per user set to **{limit}**.")
 
     @config.command(name="channel", description="Set the channel where digests will be posted (Admin only)")
     @discord.default_permissions(administrator=True)
     async def set_channel(self, ctx: discord.ApplicationContext, channel: discord.TextChannel):
-        await db.conn.execute("""
-            INSERT INTO digest_configs (guild_id, channel_id) 
-            VALUES (?, ?)
-            ON CONFLICT(guild_id) DO UPDATE SET channel_id = excluded.channel_id
-        """, (ctx.guild.id, channel.id))
-        await db.conn.commit()
+        await digest_service.set_digest_channel(ctx.guild.id, channel.id)
         await ctx.respond(f"✅ Digest channel set to {channel.mention}")
 
     @config.command(name="time", description="Set your daily digest time (24h format, e.g., 09:00)")
@@ -96,7 +86,8 @@ class Digest(commands.Cog):
     async def trigger_now(self, ctx: discord.ApplicationContext):
         await ctx.defer()
         
-        if ctx.user.id in self.processing_users:
+        lock = self._get_user_lock(ctx.user.id)
+        if lock.locked():
             await ctx.followup.send("⏳ Your digest is already being generated! Please wait.")
             return
 
@@ -112,19 +103,10 @@ class Digest(commands.Cog):
     async def digest_loop(self):
         """Checks every minute for users due for a digest."""
         try:
-            async with db.conn.execute("SELECT guild_id FROM digest_configs") as cursor:
-                guilds = await cursor.fetchall()
+            guild_ids = await digest_service.get_guilds_with_digest_config()
 
-            for guild_row in guilds:
-                guild_id = guild_row['guild_id']
-                
-                query = """
-                    SELECT user_id, timezone, daily_time, last_sent_at 
-                    FROM user_digest_settings 
-                    WHERE guild_id = ?
-                """
-                async with db.conn.execute(query, (guild_id,)) as user_cursor:
-                    users = await user_cursor.fetchall()
+            for guild_id in guild_ids:
+                users = await digest_service.get_users_for_digest_check(guild_id)
                     
                 for user in users:
                     if await digest_service.is_due(user):
@@ -140,89 +122,84 @@ class Digest(commands.Cog):
 
     # --- Digest Sending ---
 
+    def _get_user_lock(self, user_id: int) -> asyncio.Lock:
+        """Get or create a lock for a user."""
+        if user_id not in self._user_locks:
+            self._user_locks[user_id] = asyncio.Lock()
+        return self._user_locks[user_id]
+
     async def send_digest(self, guild_id: int, user_id: int) -> bool:
         """Generates and sends the digest."""
-        if user_id in self.processing_users:
+        lock = self._get_user_lock(user_id)
+        
+        if lock.locked():
             logger.info(f"Skipping digest for {user_id} - already processing")
             return False
-            
-        self.processing_users.add(user_id)
-        try:
-            # 1. Get Channel
-            async with db.conn.execute("SELECT channel_id FROM digest_configs WHERE guild_id = ?", (guild_id,)) as cursor:
-                row = await cursor.fetchone()
-                if not row:
+        
+        async with lock:
+            try:
+                channel_id = await digest_service.get_digest_channel_id(guild_id)
+                if not channel_id:
                     return False
-                channel_id = row['channel_id']
 
-            channel = self.bot.get_channel(channel_id)
-            if not channel:
+                channel = self.bot.get_channel(channel_id)
+                if not channel:
+                    try:
+                        channel = await self.bot.fetch_channel(channel_id)
+                    except discord.NotFound:
+                        return False
+                
+                if not isinstance(channel, discord.TextChannel):
+                    return False
+
+                topics = await digest_service.get_user_topics(user_id, guild_id)
+                topics = sorted(list(set(topics)), key=str.lower)
+                
+                if not topics:
+                    return False
+
+                user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+                
+                timezone_str = await digest_service.get_user_timezone(user_id, guild_id)
+                user_tz = digest_service.get_user_timezone_safe(timezone_str)
+                
+                now_user = datetime.now(user_tz)
+                date_str = now_user.strftime("%Y-%m-%d")
+                thread_name = f"Daily Digest for {user.display_name} - {date_str}"
+                
+                greeting = digest_service.get_greeting(now_user.hour)
+
                 try:
-                    channel = await self.bot.fetch_channel(channel_id)
-                except discord.NotFound:
+                    start_msg = await channel.send(f"📰 **{greeting}, {user.mention}!** Here is your Daily Digest for {date_str}")
+                    thread = await start_msg.create_thread(name=thread_name, auto_archive_duration=THREAD_ARCHIVE_DURATION_MINUTES)
+                except Exception as e:
+                    logger.error(f"Failed to create thread: {e}")
                     return False
-            
-            if not isinstance(channel, discord.TextChannel):
-                return False
 
-            # 2. Get Topics
-            topics = await digest_service.get_user_topics(user_id, guild_id)
-            topics = sorted(list(set(topics)), key=str.lower)
-            
-            if not topics:
-                return False
+                for topic in topics:
+                    section_title, content = await digest_service.generate_topic_digest(user_id, guild_id, topic)
+                    
+                    header = f"### {section_title}\n"
+                    first_chunk_limit = 1900 - len(header)
+                    
+                    if len(content) <= first_chunk_limit:
+                        await thread.send(f"{header}{content}")
+                    else:
+                        chunks = chunk_text(content, chunk_size=1900)
+                        for i, chunk in enumerate(chunks):
+                            if i == 0:
+                                await thread.send(f"{header}{chunk}")
+                            else:
+                                await thread.send(chunk)
 
-            # 3. Create Thread
-            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-            
-            timezone_str = await digest_service.get_user_timezone(user_id, guild_id)
-            
-            try:
-                user_tz = ZoneInfo(timezone_str)
-            except Exception:
-                user_tz = ZoneInfo('UTC')
-            
-            now_user = datetime.now(user_tz)
-            date_str = now_user.strftime("%Y-%m-%d")
-            thread_name = f"Daily Digest for {user.display_name} - {date_str}"
-            
-            greeting = digest_service.get_greeting(now_user.hour)
+                await digest_service.mark_digest_sent(user_id, guild_id)
+                
+                return True
 
-            try:
-                start_msg = await channel.send(f"📰 **{greeting}, {user.mention}!** Here is your Daily Digest for {date_str}")
-                thread = await start_msg.create_thread(name=thread_name, auto_archive_duration=1440)
             except Exception as e:
-                logger.error(f"Failed to create thread: {e}")
+                logger.error(f"Failed to send digest to {user_id}: {e}")
+                await db.log_error(e, {"context": "send_digest", "user_id": user_id})
                 return False
-
-            # 4. Process Topics
-            for topic in topics:
-                section_title, content = await digest_service.generate_topic_digest(user_id, guild_id, topic)
-                
-                header = f"### {section_title}\n"
-                first_chunk_limit = 1900 - len(header)
-                
-                if len(content) <= first_chunk_limit:
-                    await thread.send(f"{header}{content}")
-                else:
-                    chunks = chunk_text(content, chunk_size=1900)
-                    for i, chunk in enumerate(chunks):
-                        if i == 0:
-                            await thread.send(f"{header}{chunk}")
-                        else:
-                            await thread.send(chunk)
-
-            # 5. Update last_sent_at
-            await digest_service.mark_digest_sent(user_id, guild_id)
-            
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to send digest to {user_id}: {e}")
-            await db.log_error(e, {"context": "send_digest", "user_id": user_id})
-            return False
-        finally:
-            self.processing_users.discard(user_id)
 
 
 def setup(bot: commands.Bot):

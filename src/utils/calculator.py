@@ -34,9 +34,9 @@ CONSTANTS = {
     'e': math.e,
 }
 
-def safe_eval(node):
+def safe_eval(node: ast.AST) -> int | float:
     """
-    recursively evaluate an AST node if it's safe.
+    Recursively evaluate an AST node if it's safe.
     """
     if isinstance(node, ast.Constant):
         if isinstance(node.value, (int, float)):

@@ -17,7 +17,7 @@ class AIService:
     """
     def __init__(self):
         self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url=config.OPENROUTER_BASE_URL,
             api_key=config.OPENROUTER_API_KEY,
         )
         self.model = config.OPENROUTER_MODEL

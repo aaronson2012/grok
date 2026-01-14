@@ -5,7 +5,8 @@ import logging
 import aiofiles
 import tempfile
 import os
-from ..services.db import db
+from ..services.admin_service import admin_service
+from ..utils.constants import DISCORD_EMBED_FIELD_LIMIT
 
 logger = logging.getLogger("grok.admin")
 
@@ -31,24 +32,19 @@ class Admin(commands.Cog):
         await ctx.defer(ephemeral=True)
         target_channel = channel or ctx.channel
         
-        async with db.conn.execute(
-            "SELECT content, updated_at FROM summaries WHERE channel_id = ?", 
-            (target_channel.id,)
-        ) as cursor:
-            row = await cursor.fetchone()
+        summary = await admin_service.get_channel_summary(target_channel.id)
             
-        if not row:
+        if not summary:
             await ctx.respond(f"🧠 No memory stored for {target_channel.mention}.", ephemeral=True)
             return
             
         embed = discord.Embed(title=f"🧠 Memory for #{target_channel.name}", color=discord.Color.blue())
-        # Truncate content if it's too long for a single field value (1024 limit)
-        content = row['content']
-        if len(content) > 1024:
-            content = content[:1021] + "..."
+        content = summary['content']
+        if len(content) > DISCORD_EMBED_FIELD_LIMIT:
+            content = content[:DISCORD_EMBED_FIELD_LIMIT - 3] + "..."
             
         embed.add_field(name="Summary", value=content, inline=False)
-        embed.set_footer(text=f"Last updated: {row['updated_at']}")
+        embed.set_footer(text=f"Last updated: {summary['updated_at']}")
         
         await ctx.respond(embed=embed, ephemeral=True)
 
@@ -58,8 +54,7 @@ class Admin(commands.Cog):
         await ctx.defer(ephemeral=True)
         target_channel = channel or ctx.channel
         
-        await db.conn.execute("DELETE FROM summaries WHERE channel_id = ?", (target_channel.id,))
-        await db.conn.commit()
+        await admin_service.clear_channel_summary(target_channel.id)
         
         await ctx.respond(f"🧹 Memory cleared for {target_channel.mention}.", ephemeral=True)
 
@@ -74,11 +69,7 @@ class Admin(commands.Cog):
         if limit < 1 or limit > 20:
             limit = 5
             
-        async with db.conn.execute(
-            "SELECT id, error_type, message, created_at FROM error_logs ORDER BY id DESC LIMIT ?", 
-            (limit,)
-        ) as cursor:
-            rows = await cursor.fetchall()
+        rows = await admin_service.get_recent_errors(limit)
             
         if not rows:
             await ctx.respond("✅ No errors logged.", ephemeral=True)
@@ -96,8 +87,7 @@ class Admin(commands.Cog):
     @discord.default_permissions(administrator=True)
     async def logs_clear(self, ctx: discord.ApplicationContext):
         await ctx.defer(ephemeral=True)
-        await db.conn.execute("DELETE FROM error_logs")
-        await db.conn.commit()
+        await admin_service.clear_all_errors()
         
         await ctx.respond("🔥 All error logs have been cleared.", ephemeral=True)
         
@@ -105,32 +95,23 @@ class Admin(commands.Cog):
     @discord.default_permissions(administrator=True)
     async def logs_details(self, ctx: discord.ApplicationContext, error_id: int):
         await ctx.defer(ephemeral=True)
-        async with db.conn.execute(
-            "SELECT * FROM error_logs WHERE id = ?", 
-            (error_id,)
-        ) as cursor:
-            row = await cursor.fetchone()
+        error_details = await admin_service.get_error_details(error_id)
             
-        if not row:
+        if not error_details:
             await ctx.respond(f"❌ Error #{error_id} not found.", ephemeral=True)
             return
             
-        # Create a text file if the traceback is long
-        traceback_text = row['traceback']
-        context_text = row['context']
-        
         full_report = (
-            f"Error ID: {row['id']}\n"
-            f"Type: {row['error_type']}\n"
-            f"Message: {row['message']}\n"
-            f"Time: {row['created_at']}\n"
+            f"Error ID: {error_details['id']}\n"
+            f"Type: {error_details['error_type']}\n"
+            f"Message: {error_details['message']}\n"
+            f"Time: {error_details['created_at']}\n"
             f"{'-'*40}\n"
-            f"CONTEXT:\n{context_text}\n"
+            f"CONTEXT:\n{error_details['context']}\n"
             f"{'-'*40}\n"
-            f"TRACEBACK:\n{traceback_text}\n"
+            f"TRACEBACK:\n{error_details['traceback']}\n"
         )
         
-        # If report is small enough, send as embed, else file
         if len(full_report) < 1900:
             await ctx.respond(f"```\n{full_report}\n```", ephemeral=True)
         else:
