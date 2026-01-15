@@ -44,7 +44,7 @@ class TestBuildSystemPrompt:
             current_summary="Previous conversation about cats.",
         )
         
-        assert "[PREVIOUS CONVERSATION SUMMARY]" in result
+        assert "[OLDER CONVERSATION SUMMARY]" in result
         assert "Previous conversation about cats." in result
 
     @pytest.mark.asyncio
@@ -70,6 +70,24 @@ class TestBuildSystemPrompt:
         
         # Emoji block is included but no instruction about custom emojis
         assert "Custom Server Emojis" not in result
+
+    @pytest.mark.asyncio
+    async def test_with_chat_history(self, chat_service):
+        history = [
+            {"role": "user", "content": "[123]: What is Python?"},
+            {"role": "assistant", "content": "Python is a programming language."},
+        ]
+        result = await chat_service.build_system_prompt(
+            base_persona="You are a test bot.",
+            platform=Platform.DISCORD,
+            chat_history=history,
+        )
+        
+        assert "[RECENT CHAT LOG" in result
+        assert "What is Python?" in result
+        assert "Python is a programming language." in result
+        assert "[END OF CHAT LOG]" in result
+        assert "TRIGGERING MESSAGE" in result
 
 
 class TestBuildMessageHistory:
@@ -219,7 +237,6 @@ class TestHandleToolCalls:
                 ai_msg=mock_ai_msg,
                 system_prompt="System",
                 user_message="User message",
-                history=[],
                 send_status=mock_send_status,
             )
             
@@ -248,7 +265,6 @@ class TestHandleToolCalls:
                 ai_msg=mock_ai_msg,
                 system_prompt="System",
                 user_message="What is 2+2?",
-                history=[],
                 send_status=mock_send_status,
             )
             

@@ -83,7 +83,6 @@ async def chat_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             ai_msg=ai_msg,
             system_prompt=system_prompt,
             user_message=user_message,
-            history=[],
             send_status=send_status,
             context={"chat_id": chat_id}
         )
@@ -120,15 +119,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     system_prompt = await chat_service.build_system_prompt(
         base_persona=base_persona,
         platform=Platform.TELEGRAM,
-        current_summary=current_summary
+        current_summary=current_summary,
+        chat_history=history
     )
 
     user_content = await _build_user_message_content(message, text, user_id)
 
     ai_msg = await ai_service.generate_response(
         system_prompt=system_prompt,
-        user_message=user_content,
-        history=history
+        user_message=user_content
     )
 
     if ai_msg.tool_calls:
@@ -139,7 +138,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             ai_msg=ai_msg,
             system_prompt=system_prompt,
             user_message=f"[{user_id}]: {text}",
-            history=history,
             send_status=send_status,
             context={"chat_id": chat_id}
         )

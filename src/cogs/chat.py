@@ -129,34 +129,31 @@ class Chat(commands.Cog):
                 base_persona = await db.get_guild_persona(message.guild.id) if message.guild else "You are a helpful assistant."
                 emoji_context = await db.get_guild_emojis_context(message.guild.id) if message.guild else ""
                 
-                # Build system prompt using chat_service
+                # History embedded in system prompt, not as conversation turns (fixes old message response bug)
                 system_prompt = await chat_service.build_system_prompt(
                     base_persona=base_persona,
                     platform=Platform.DISCORD,
                     current_summary=current_summary,
-                    emoji_context=emoji_context
+                    emoji_context=emoji_context,
+                    chat_history=history
                 )
 
                 user_content = await self._build_user_message_content(message, clean_content)
                 
-                # First AI Call
                 ai_msg = await ai_service.generate_response(
                     system_prompt=system_prompt,
-                    user_message=user_content,
-                    history=history
+                    user_message=user_content
                 )
 
                 # Tool Execution using chat_service
                 if ai_msg.tool_calls:
                     async def send_status(text: str) -> None:
-                        # Convert markdown italic to Discord format
                         await message.channel.send(text)
                     
                     response_text = await chat_service.handle_tool_calls(
                         ai_msg=ai_msg,
                         system_prompt=system_prompt,
                         user_message=clean_content,
-                        history=history,
                         send_status=send_status,
                         context={"guild_id": message.guild.id if message.guild else None}
                     )
@@ -198,7 +195,6 @@ class Chat(commands.Cog):
                 ai_msg=ai_msg,
                 system_prompt=system_prompt,
                 user_message=clean_content_with_name,
-                history=[],
                 send_status=send_status,
                 context={"guild_id": ctx.guild.id if ctx.guild else None}
             )

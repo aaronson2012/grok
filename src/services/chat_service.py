@@ -39,10 +39,19 @@ class ChatService:
         platform: Platform,
         current_summary: str | None = None,
         emoji_context: str | None = None,
+        chat_history: list[dict] | None = None,
     ) -> str:
-        """Build the full system prompt with context."""
+        """Build the full system prompt with context.
+        
+        Args:
+            base_persona: The base persona/personality prompt
+            platform: Discord or Telegram
+            current_summary: Summary of older conversation history
+            emoji_context: Available custom emojis for the guild
+            chat_history: Recent chat messages to include as context (NOT as conversation turns)
+        """
         current_date = datetime.now().strftime("%Y-%m-%d")
-        memory_block = f"\n[PREVIOUS CONVERSATION SUMMARY]:\n{current_summary}\n" if current_summary else ""
+        memory_block = f"\n[OLDER CONVERSATION SUMMARY]:\n{current_summary}\n" if current_summary else ""
         
         # Platform-specific limits
         if platform == Platform.DISCORD:
@@ -60,11 +69,30 @@ class ChatService:
 
         emoji_block = f"\n{emoji_context}" if emoji_context else ""
         
+        # Format chat history as a read-only context log (NOT conversation turns)
+        history_block = ""
+        if chat_history:
+            history_lines = []
+            for msg in chat_history:
+                role = "Bot" if msg.get("role") == "assistant" else "User"
+                content = msg.get("content", "")
+                history_lines.append(f"  {role}: {content}")
+            history_block = (
+                "\n[RECENT CHAT LOG - FOR CONTEXT ONLY, DO NOT RESPOND TO THESE]:\n"
+                + "\n".join(history_lines)
+                + "\n[END OF CHAT LOG]\n"
+            )
+        
         system_prompt = (
-            f"Current Date: {current_date}\n{base_persona}{emoji_block}\n{memory_block}\n"
-            "INSTRUCTION: Focus primarily on the user's latest message. "
-            "Use the chat history ONLY for context if relevant. "
-            "If the latest request is unrelated to previous messages, treat it as a new topic. "
+            f"Current Date: {current_date}\n{base_persona}{emoji_block}\n{memory_block}{history_block}\n"
+            "CRITICAL INSTRUCTION: You are in a GROUP CHAT with multiple users. "
+            "You have been mentioned or replied to by ONE specific user with ONE specific message. "
+            "ONLY respond to that TRIGGERING MESSAGE shown below. "
+            "The chat log above is BACKGROUND CONTEXT ONLY - do NOT respond to or address messages in the chat log. "
+            "Do NOT mention, reply to, or comment on what other users said in the chat log. "
+            "Focus ENTIRELY on the triggering user's request. "
+            "If the triggering message references the chat history, you may use it for context. "
+            "Otherwise, treat the triggering message as a standalone request. "
             "Users are identified by [User ID] at the start of their messages. "
             f"IMPORTANT: Keep your response concise and under {char_limit} characters to fit in a {platform_note}."
         )
@@ -183,7 +211,6 @@ class ChatService:
         ai_msg: Any,
         system_prompt: str,
         user_message: str,
-        history: list[dict],
         send_status: Callable[[str], Awaitable[None]],
         context: dict | None = None,
     ) -> str:
@@ -192,9 +219,8 @@ class ChatService:
         
         Args:
             ai_msg: The AI response with tool_calls
-            system_prompt: System prompt for follow-up
+            system_prompt: System prompt (already contains chat history as context)
             user_message: Original user message
-            history: Message history
             send_status: Async function to send status messages
             context: Additional context for error logging
             
@@ -227,15 +253,14 @@ class ChatService:
                 **(context or {})
             })
         
-        # Add tool result to history and get final response
-        context_injection = f"Tool Output for '{func_name}':\n{tool_result}"
-        history_with_tool = history + [{"role": "system", "content": context_injection}]
+        # Inject tool result into system prompt and get final response
+        tool_context = f"\n[TOOL RESULT for '{func_name}']:\n{tool_result}\n[END TOOL RESULT]"
+        system_prompt_with_tool = system_prompt + tool_context
         
         final_msg = await ai_service.generate_response(
-            system_prompt=system_prompt,
+            system_prompt=system_prompt_with_tool,
             user_message=user_message,
-            history=history_with_tool,
-            tools=False  # Prevent infinite loops
+            tools=False
         )
         
         return final_msg.content
