@@ -14,13 +14,6 @@ primary_region = 'iad'
   source = 'grok_data'
   destination = '/data'
 
-[checks]
-  [checks.alive]
-    type = "machine"
-    grace_period = "30s"
-    interval = "60s"
-    timeout = "10s"
-
 [[vm]]
   memory = '512mb'
   cpu_kind = 'shared'
